@@ -370,6 +370,43 @@ export async function createSquad(_: ActionState, fd: FormData): Promise<ActionS
     const modelo = str(fd, "modelo", 60) || "sonnet";
     if (!RE_NAME.test(owner) || !RE_NAME.test(nome)) return { error: "Dono ou nome do repositório inválido." };
     const [tOwner, tRepo] = env.templateRepo.split("/");
+    if (!tOwner || !tRepo) return { error: `SQUAD_TEMPLATE_REPO inválido ("${env.templateRepo}"). Use o formato dono/repositorio.` };
+
+    // ---- pré-checagens: dizem exatamente qual requisito falta ----
+    let template;
+    try {
+      template = (await o.repos.get({ owner: tOwner, repo: tRepo })).data;
+    } catch (e) {
+      if (status(e) === 404)
+        return {
+          error: `Não consigo acessar o template ${env.templateRepo}. Confira a variável SQUAD_TEMPLATE_REPO e se sua conta tem acesso a esse repositório.`,
+        };
+      throw e;
+    }
+    if (template.full_name.toLowerCase() !== env.templateRepo.toLowerCase())
+      return {
+        error: `O template mudou de endereço: agora é ${template.full_name}. Atualize a variável SQUAD_TEMPLATE_REPO para esse valor.`,
+      };
+    if (!template.is_template)
+      return {
+        error: `O repositório ${template.full_name} ainda não está marcado como template. No GitHub: Settings → marque "Template repository" e tente de novo.`,
+      };
+
+    if (owner.toLowerCase() !== user.login.toLowerCase()) {
+      try {
+        const m = (await o.orgs.getMembershipForAuthenticatedUser({ org: owner })).data;
+        if (m.state !== "active") return { error: `Seu convite para a organização ${owner} ainda está pendente no GitHub.` };
+      } catch (e) {
+        if (status(e) === 404 || status(e) === 403)
+          return {
+            error: `O console não tem acesso à organização ${owner}. Saia, entre de novo e, na tela de autorização do GitHub, clique em "Grant" ao lado de ${owner} (ou aprove o OAuth App em Settings → Third-party access da organização).`,
+          };
+        throw e;
+      }
+    }
+
+    const existente = await o.repos.get({ owner, repo: nome }).then(() => true).catch((e) => (status(e) === 404 ? false : Promise.reject(e)));
+    if (existente) return { error: `Já existe um repositório ${owner}/${nome}. Escolha outro nome.` };
 
     try {
       await o.repos.createUsingTemplate({
@@ -384,7 +421,9 @@ export async function createSquad(_: ActionState, fd: FormData): Promise<ActionS
       const msg = errMsg(e);
       if (status(e) === 422 && /template/i.test(msg))
         return { error: `O repositório ${env.templateRepo} não está marcado como Template no GitHub (Settings → Template repository).` };
-      return { error: msg };
+      if (status(e) === 404 || status(e) === 403)
+        return { error: `O GitHub não deixou criar ${owner}/${nome}. Verifique se você pode criar repositórios em ${owner} (permissão de membro da organização). Detalhe: ${msg}` };
+      return { error: `Falha ao criar o repositório: ${msg}` };
     }
 
     // a geração a partir do template é assíncrona: espera o conteúdo aparecer
@@ -395,7 +434,10 @@ export async function createSquad(_: ActionState, fd: FormData): Promise<ActionS
     }
     if (!squadYaml) return { error: "Repositório criado, mas o conteúdo do template ainda não apareceu. Abra a lista de squads em instantes." };
 
+    let etapa = "ler o repositório criado";
+    try {
     const repoInfo = (await o.repos.get({ owner, repo: nome })).data;
+    etapa = "adicionar o tópico";
     await o.repos.replaceAllTopics({ owner, repo: nome, names: [env.topic] });
 
     const yamlStr = (v: string) => JSON.stringify(v);
@@ -410,16 +452,23 @@ export async function createSquad(_: ActionState, fd: FormData): Promise<ActionS
       "alerta_custo_usd: 5",
       "",
     ].join("\n");
+    etapa = "gravar .squad/squad.yaml";
     await writeFile(o, {
       owner, repo: nome, path: ".squad/squad.yaml", branch: repoInfo.default_branch,
       sha: squadYaml.sha, content: cfg, message: "config: dados da squad",
     });
+    etapa = "gravar .squad/members.yaml";
     const mem = await readFile(o, owner, nome, ".squad/members.yaml");
     await writeFile(o, {
       owner, repo: nome, path: ".squad/members.yaml", branch: repoInfo.default_branch, sha: mem?.sha,
       message: "config: operador inicial",
       content: `# Papéis na squad (logins do GitHub). Veja AGENTS.md.\noperadores:\n  - ${user.login}\nmembros: []\nleitores: []\n`,
     });
+    } catch (e) {
+      return {
+        error: `O repositório ${owner}/${nome} foi criado, mas falhou ao ${etapa}: ${errMsg(e)}. Conclua em Configuração ou ajuste direto no GitHub.`,
+      };
+    }
     destino = `/s/${owner}/${nome}/config?nova=1`;
   } catch (e) {
     return { error: errMsg(e) };
