@@ -2,7 +2,7 @@
 
 Console web para **configurar e operar squads agênticas de Data Analytics**, onde um único humano (o Operador) comanda uma squad inteira de agentes.
 
-Funciona junto com o template [`agentic-data-squad`](https://github.com/mellrodrigo/agentic-data-squad).
+Funciona junto com o template [`agentic-data-squad`](https://github.com/RGMThech/agentic-data-squad).
 
 ## O que dá para fazer
 

@@ -10,13 +10,20 @@ Endereço de produção: **https://iadasilva.com.br**
 
 ## 1. Antes de começar (5 min)
 
-1. **Template marcado como template.** No GitHub, abra `mellrodrigo/agentic-data-squad` → **Settings** → marque **Template repository**. Sem isso, o botão "Nova squad" do console não funciona.
+1. **Template marcado como template.** No GitHub, abra `RGMThech/agentic-data-squad` → **Settings** → marque **Template repository**. Sem isso, o botão "Nova squad" do console não funciona.
    - Na página inicial do repositório, em **About → ⚙️**, adicione o tópico `agentic-data-squad`. O console só lista repositórios com esse tópico; as squads criadas pelo console já recebem o tópico automaticamente.
 2. **Domínio com SSL.** No hPanel, confirme que `iadasilva.com.br` aponta para a hospedagem e que o **SSL** está ativo. O login com GitHub exige HTTPS.
+3. **Actions pode abrir PRs (obrigatório).** Na organização **RGMThech** → **Settings → Actions → General → Workflow permissions**:
+   - marque **Read and write permissions**
+   - marque **Allow GitHub Actions to create and approve pull requests**
+
+   Sem isso, o agente roda e commita, mas o workflow falha ao abrir o PR da feature. Confira também **Actions permissions**: o workflow usa apenas actions oficiais do GitHub (`actions/checkout`, `setup-python`, `setup-node`).
 
 ## 2. Criar o GitHub OAuth App
 
-GitHub → **Settings** → **Developer settings** → **OAuth Apps** → **New OAuth App**
+Crie o app **dentro da organização**, para que ele pertença à RGMThech e não a uma conta pessoal:
+
+GitHub → organização **RGMThech** → **Settings** → **Developer settings** → **OAuth Apps** → **New OAuth App**
 
 | Campo | Valor |
 |-------|-------|
@@ -28,12 +35,12 @@ Depois de criar:
 - copie o **Client ID**
 - clique em **Generate a new client secret** e copie o **Client secret**
 
-> **Squads em organizações (clientes):** se a organização no GitHub tiver restrição a apps de terceiros, um owner precisa aprovar o *Squad Console* em **Organization settings → Third-party access → OAuth app policy**. Sem essa aprovação, os repositórios da organização não aparecem.
+> **Squads em outras organizações (clientes):** se a organização do cliente tiver restrição a apps de terceiros, um owner dela precisa aprovar o *Squad Console* em **Organization settings → Third-party access → OAuth app policy**. Sem essa aprovação, os repositórios daquela organização não aparecem no console.
 
 ## 3. Criar o app Node.js no hPanel
 
 1. hPanel → **Websites** → **Adicionar site** → **Node.js Web App**.
-2. Escolha **Importar do GitHub**, autorize a Hostinger e selecione o repositório `mellrodrigo/agentic-squad-console`, branch `main`.
+2. Escolha **Importar do GitHub** e autorize a Hostinger. Na tela de autorização do GitHub, conceda acesso à organização **RGMThech** (botão *Grant* ao lado dela); sem isso, o repositório não aparece na lista. Selecione `RGMThech/agentic-squad-console`, branch `main`.
 3. Confira as configurações de build. O framework deve ser detectado como **Next.js**.
 
    | Configuração | Valor |
@@ -56,10 +63,10 @@ No app Node.js do hPanel, cadastre as variáveis abaixo **antes do primeiro depl
 | `GITHUB_CLIENT_ID` | o Client ID do passo 2 |
 | `GITHUB_CLIENT_SECRET` | o Client secret do passo 2 |
 | `SESSION_SECRET` | um segredo aleatório de 32+ caracteres (veja abaixo) |
-| `SQUAD_TEMPLATE_REPO` | `mellrodrigo/agentic-data-squad` |
+| `SQUAD_TEMPLATE_REPO` | `RGMThech/agentic-data-squad` |
 | `SQUAD_TOPIC` | `agentic-data-squad` |
 | `ALLOWED_GITHUB_USERS` | *(recomendado no início)* `mellrodrigo` |
-| `ALLOWED_GITHUB_ORGS` | *(opcional)* organizações cujos membros podem entrar, separadas por vírgula |
+| `ALLOWED_GITHUB_ORGS` | *(recomendado)* `RGMThech`: membros da organização podem entrar. Para clientes, acrescente as organizações deles, separadas por vírgula |
 
 Para gerar o `SESSION_SECRET` no seu computador:
 

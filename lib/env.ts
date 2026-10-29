@@ -32,7 +32,7 @@ export const env = {
     return s;
   },
   get templateRepo() {
-    return process.env.SQUAD_TEMPLATE_REPO || "mellrodrigo/agentic-data-squad";
+    return process.env.SQUAD_TEMPLATE_REPO || "RGMThech/agentic-data-squad";
   },
   get topic() {
     return (process.env.SQUAD_TOPIC || "agentic-data-squad").toLowerCase();
