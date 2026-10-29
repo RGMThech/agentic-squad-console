@@ -6,7 +6,7 @@ import { RoleBadge } from "@/components/Status";
 import { mergeConfigPR, newAgent, setApiKey } from "@/lib/actions";
 import { can, parseFrontmatter } from "@/lib/core";
 import { ago, when } from "@/lib/format";
-import { listDir, readFile, status } from "@/lib/github";
+import { listDir, readFile, status, type GH } from "@/lib/github";
 import { getSquad, type SquadParams } from "@/lib/page";
 import { apiKeyStatus, listSquadPRs } from "@/lib/squad";
 
@@ -26,10 +26,7 @@ export default async function ConfigPage({ params, searchParams }: { params: Squ
     operador ? apiKeyStatus(ctx) : Promise.resolve(null),
     listSquadPRs(ctx, "config/").then((l) => l.filter((p) => p.state === "open")),
     readFile(ctx.o, owner, repo, ".github/workflows/squad-agent.yml", ctx.defaultBranch),
-    ctx.o.repos
-      .getBranchProtection({ owner, repo, branch: ctx.defaultBranch })
-      .then(() => "ativa" as const)
-      .catch((e) => (status(e) === 404 ? ("ausente" as const) : ("desconhecida" as const))),
+    protecaoDaBranch(ctx.o, owner, repo, ctx.defaultBranch),
   ]);
 
   const agentes = await Promise.all(
@@ -242,6 +239,19 @@ export default async function ConfigPage({ params, searchParams }: { params: Squ
       </div>
     </>
   );
+}
+
+/** Proteção por ruleset (formato atual) ou por branch protection rule (formato clássico). */
+async function protecaoDaBranch(o: GH, owner: string, repo: string, branch: string): Promise<"ativa" | "ausente" | "desconhecida"> {
+  const regras = await o.repos
+    .getBranchRules({ owner, repo, branch })
+    .then((r) => r.data.map((x) => x.type))
+    .catch(() => null);
+  if (regras?.includes("pull_request")) return "ativa";
+  return o.repos
+    .getBranchProtection({ owner, repo, branch })
+    .then(() => "ativa" as const)
+    .catch((e) => (status(e) === 404 ? ("ausente" as const) : regras ? ("ausente" as const) : ("desconhecida" as const)));
 }
 
 function Health({ ok, t, d }: { ok: boolean; t: string; d: string }) {
