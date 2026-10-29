@@ -1,0 +1,285 @@
+// Lógica pura (sem dependência de Next ou GitHub), testada em tests/core.test.ts.
+import YAML from "yaml";
+
+export type Role = "operador" | "membro" | "leitor";
+export type GateState = "nao_iniciado" | "pendente" | "aguardando" | "aprovado";
+
+export const RE_FEATURE = /^\d{3}-[a-z0-9]+(?:-[a-z0-9]+)*$/;
+export const RE_NAME = /^[A-Za-z0-9_.-]{1,100}$/;
+export const RE_AGENT = /^[a-z][a-z0-9-]{1,48}$/;
+
+// ---------- front matter ----------
+export type Frontmatter = Record<string, string>;
+
+export function parseFrontmatter(text: string): { data: Frontmatter; body: string } {
+  const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)([\s\S]*)$/);
+  if (!m) return { data: {}, body: text };
+  let raw: unknown = {};
+  try {
+    raw = YAML.parse(m[1], { schema: "failsafe" }) ?? {};
+  } catch {
+    raw = {};
+  }
+  const data: Frontmatter = {};
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof v === "string") data[k] = v.trim();
+    }
+  }
+  return { data, body: m[2] };
+}
+
+/** Atualiza (ou acrescenta) chaves do front matter preservando o restante do arquivo. */
+export function setFrontmatter(text: string, updates: Record<string, string>): string {
+  const m = text.match(/^(---\r?\n)([\s\S]*?)(\r?\n---)/);
+  if (!m) throw new Error("O arquivo não tem front matter (bloco --- no início).");
+  let fm = m[2];
+  for (const [k, v] of Object.entries(updates)) {
+    const re = new RegExp(`^${k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:.*$`, "m");
+    fm = re.test(fm) ? fm.replace(re, `${k}: ${v}`) : `${fm}\n${k}: ${v}`;
+  }
+  return m[1] + fm + m[3] + text.slice(m[0].length);
+}
+
+/** Itens "- [ ]" na seção "Dúvidas abertas" (mesma regra do scripts/check_spec.py). */
+export function openDoubts(body: string): string[] {
+  const m = body.match(/^## *\d*\.? *Dúvidas abertas[ \t]*$([\s\S]*?)(?=^## |(?![\s\S]))/m);
+  if (!m) return [];
+  return m[1]
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith("- [ ]"))
+    .map((l) => l.slice(5).trim());
+}
+
+// ---------- tarefas ----------
+export type Task = { id: string; tarefa: string; agente: string; ciclos: string; status: string };
+
+export function parseTasks(body: string): Task[] {
+  const lines = body.split(/\r?\n/);
+  const headerIdx = lines.findIndex((l) => /^\|\s*ID\s*\|/i.test(l) && /status/i.test(l));
+  if (headerIdx < 0) return [];
+  const header = splitRow(lines[headerIdx]).map((h) => h.toLowerCase());
+  const col = (name: string) => header.findIndex((h) => h.startsWith(name));
+  const iId = col("id"), iTarefa = col("tarefa"), iAgente = col("agente"), iCiclos = col("ciclos"), iStatus = col("status");
+  const out: Task[] = [];
+  for (const line of lines.slice(headerIdx + 2)) {
+    if (!line.trim().startsWith("|")) break;
+    const c = splitRow(line);
+    if (!c[iId] || !/^T-\d+/i.test(c[iId])) continue;
+    out.push({
+      id: c[iId],
+      tarefa: c[iTarefa] ?? "",
+      agente: c[iAgente] ?? "",
+      ciclos: iCiclos >= 0 ? c[iCiclos] ?? "" : "",
+      status: (iStatus >= 0 ? c[iStatus] ?? "" : "").replace(/`/g, "").toLowerCase(),
+    });
+  }
+  return out;
+}
+
+function splitRow(line: string): string[] {
+  return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((s) => s.trim());
+}
+
+// ---------- ids e nomes ----------
+export function slugify(text: string, max = 40): string {
+  const s = text
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, max)
+    .replace(/-+$/g, "");
+  return s || "feature";
+}
+
+export function nextFeatureId(existing: string[], titulo: string): string {
+  const nums = existing.map((f) => parseInt(f.slice(0, 3), 10)).filter((n) => !Number.isNaN(n));
+  const next = Math.max(0, ...nums) + 1;
+  return `${String(next).padStart(3, "0")}-${slugify(titulo)}`;
+}
+
+export function todaySaoPaulo(d = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(d);
+}
+
+// ---------- papéis ----------
+export type Members = { operadores: string[]; membros: string[]; leitores: string[] };
+
+export function parseMembers(text: string | null): Members {
+  const empty: Members = { operadores: [], membros: [], leitores: [] };
+  if (!text) return empty;
+  try {
+    const d = YAML.parse(text) ?? {};
+    const list = (v: unknown) => (Array.isArray(v) ? v.map((x) => String(x).replace(/^@/, "")) : []);
+    return { operadores: list(d.operadores), membros: list(d.membros), leitores: list(d.leitores) };
+  } catch {
+    return empty;
+  }
+}
+
+export function resolveRole(login: string, members: Members, permission: string): Role {
+  const canWrite = ["admin", "maintain", "write"].includes(permission);
+  if (members.operadores.includes(login)) return canWrite ? "operador" : "leitor";
+  if (members.membros.includes(login)) return canWrite ? "membro" : "leitor";
+  if (members.operadores.length === 0 && permission === "admin") return "operador";
+  return "leitor";
+}
+
+export function can(role: Role, action: "ver" | "acionar" | "aprovar" | "configurar"): boolean {
+  if (action === "ver") return true;
+  if (action === "acionar") return role === "operador" || role === "membro";
+  return role === "operador";
+}
+
+// ---------- execuções ----------
+export type RunRecord = {
+  run_id: string;
+  run_url?: string;
+  agente: string;
+  feature: string;
+  ator: string;
+  modelo?: string;
+  status: string;
+  custo_usd: number;
+  turnos?: number | null;
+  duracao_ms?: number | null;
+  validadores?: string;
+  ts?: number;
+};
+
+export function parseRunRecords(body: string): RunRecord[] {
+  const out: RunRecord[] = [];
+  for (const m of body.matchAll(/<!--\s*squad-run\s+(\{[\s\S]*?\})\s*-->/g)) {
+    try {
+      const r = JSON.parse(m[1]);
+      if (r && r.run_id) out.push({ ...r, run_id: String(r.run_id), custo_usd: Number(r.custo_usd) || 0 });
+    } catch {
+      /* comentário malformado: ignora */
+    }
+  }
+  return out;
+}
+
+export function parseRunTitle(title: string): { agente: string; feature: string; ator: string } | null {
+  const parts = title.split(" · ").map((s) => s.trim());
+  if (parts.length < 3) return null;
+  return { agente: parts[0], feature: parts[1], ator: parts[2].replace(/^@/, "") };
+}
+
+// ---------- gates ----------
+export type GateInput = {
+  specStatus?: string;
+  designStatus?: string;
+  qaVeredito?: string;
+  hasReview: boolean;
+  prState?: "open" | "closed" | "merged";
+  onMainOnly: boolean;
+};
+
+export function computeGates(i: GateInput): { g1: GateState; g2: GateState; g3: GateState } {
+  if (i.onMainOnly || i.prState === "merged") return { g1: "aprovado", g2: "aprovado", g3: "aprovado" };
+  const g1: GateState = !i.specStatus ? "pendente" : i.specStatus === "aprovado" ? "aprovado" : "aguardando";
+  let g2: GateState = "nao_iniciado";
+  if (g1 === "aprovado") g2 = !i.designStatus ? "pendente" : i.designStatus === "aprovado" ? "aprovado" : "aguardando";
+  let g3: GateState = "nao_iniciado";
+  if (g2 === "aprovado") {
+    const pronto = i.prState === "open" && i.hasReview && (i.qaVeredito ?? "").toUpperCase().startsWith("APROVADO");
+    g3 = pronto ? "aguardando" : "pendente";
+  }
+  return { g1, g2, g3 };
+}
+
+/** Próximo agente sugerido e instrução padrão para o estado atual. */
+export function nextStep(g: { g1: GateState; g2: GateState; g3: GateState }, feature: string) {
+  if (g.g1 === "pendente")
+    return { agente: "analista-requisitos", instrucao: `Crie a spec da feature ${feature} a partir do pedido registrado.` };
+  if (g.g1 === "aguardando")
+    return { agente: "analista-requisitos", instrucao: "Incorpore as respostas e ajustes do Operador na spec." };
+  if (g.g2 === "pendente")
+    return { agente: "arquiteto-dados", instrucao: `A spec de ${feature} foi aprovada (G1). Produza o design.md, os contratos e os ADRs necessários.` };
+  if (g.g2 === "aguardando")
+    return { agente: "arquiteto-dados", instrucao: "Incorpore os ajustes do Operador no design." };
+  if (g.g3 === "pendente")
+    return { agente: "orquestrador", instrucao: `Spec e design de ${feature} aprovados (G1 e G2). Execute a feature até deixar o G3 pronto: tasks, implementação, QA, revisão e documentação.` };
+  return { agente: "orquestrador", instrucao: "Trate os pontos levantados pelo Operador antes do G3." };
+}
+
+export const AGENTES_PADRAO = [
+  "analista-requisitos",
+  "arquiteto-dados",
+  "orquestrador",
+  "eng-ingestao",
+  "eng-transformacao",
+  "qa-data-quality",
+  "analytics-bi",
+  "revisor",
+  "governanca-docs",
+];
+
+// ---------- caminhos editáveis na configuração ----------
+export const CONFIG_PATHS: RegExp[] = [
+  /^AGENTS\.md$/,
+  /^CLAUDE\.md$/,
+  /^\.squad\/(squad|members)\.yaml$/,
+  /^\.claude\/agents\/[a-z][a-z0-9-]*\.md$/,
+  /^\.claude\/skills\/[a-z][a-z0-9-]*\/SKILL\.md$/,
+  /^docs\/naming-convention\.md$/,
+];
+
+export function isEditablePath(p: string): boolean {
+  return CONFIG_PATHS.some((re) => re.test(p));
+}
+
+/** Validação mínima de conteúdo antes de abrir PR de configuração. Retorna mensagem de erro ou null. */
+export function validateConfigContent(path: string, content: string): string | null {
+  if (!content.trim()) return "O arquivo não pode ficar vazio.";
+  if (path.endsWith(".yaml")) {
+    try {
+      const d = YAML.parse(content);
+      if (path.endsWith("members.yaml")) {
+        for (const k of ["operadores", "membros", "leitores"]) {
+          if (d?.[k] != null && !Array.isArray(d[k])) return `"${k}" precisa ser uma lista.`;
+        }
+        if (!Array.isArray(d?.operadores) || d.operadores.length === 0) return "Mantenha pelo menos um operador.";
+      }
+    } catch (e) {
+      return `YAML inválido: ${(e as Error).message.split("\n")[0]}`;
+    }
+  }
+  const agent = path.match(/^\.claude\/agents\/([a-z][a-z0-9-]*)\.md$/);
+  if (agent) {
+    const { data } = parseFrontmatter(content);
+    if (data.name !== agent[1]) return `O campo "name" do front matter deve ser "${agent[1]}".`;
+    if (!data.description) return 'Inclua "description" no front matter.';
+    if (!data.tools) return 'Inclua "tools" no front matter (ex.: Read, Grep, Glob).';
+  }
+  const skill = path.match(/^\.claude\/skills\/([a-z][a-z0-9-]*)\/SKILL\.md$/);
+  if (skill) {
+    const { data } = parseFrontmatter(content);
+    if (!data.name || !data.description) return 'Skill precisa de "name" e "description" no front matter.';
+  }
+  return null;
+}
+
+export function agentTemplate(name: string): string {
+  return `---
+name: ${name}
+description: <quando usar este agente, em uma frase>
+tools: Read, Grep, Glob, Write, Edit
+---
+
+Você é o agente **${name}**. Leia \`AGENTS.md\` antes de tudo.
+
+## Missão
+<o que este agente entrega>
+
+## Procedimento
+1. ...
+
+## Regras
+- Nunca aprove gates.
+`;
+}
