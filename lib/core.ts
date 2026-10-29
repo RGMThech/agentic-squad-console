@@ -113,19 +113,53 @@ export function parseMembers(text: string | null): Members {
   if (!text) return empty;
   try {
     const d = YAML.parse(text) ?? {};
-    const list = (v: unknown) => (Array.isArray(v) ? v.map((x) => String(x).replace(/^@/, "")) : []);
+    const list = (v: unknown) =>
+      Array.isArray(v) ? [...new Set(v.map((x) => String(x).trim().replace(/^@/, "").toLowerCase()).filter(Boolean))] : [];
     return { operadores: list(d.operadores), membros: list(d.membros), leitores: list(d.leitores) };
   } catch {
     return empty;
   }
 }
 
-export function resolveRole(login: string, members: Members, permission: string): Role {
-  const canWrite = ["admin", "maintain", "write"].includes(permission);
-  if (members.operadores.includes(login)) return canWrite ? "operador" : "leitor";
-  if (members.membros.includes(login)) return canWrite ? "membro" : "leitor";
-  if (members.operadores.length === 0 && permission === "admin") return "operador";
-  return "leitor";
+/**
+ * Papel de um usuário do console numa squad. Administradores do console são
+ * operadores em todas as squads. Quem não está listado não tem acesso (null).
+ */
+export function resolveRole(email: string, members: Members, isAdmin: boolean): Role | null {
+  if (isAdmin) return "operador";
+  const e = email.trim().toLowerCase();
+  if (members.operadores.includes(e)) return "operador";
+  if (members.membros.includes(e)) return "membro";
+  if (members.leitores.includes(e)) return "leitor";
+  return null;
+}
+
+/** Reescreve .squad/members.yaml a partir das listas (mantém o cabeçalho explicativo). */
+export function serializeMembers(m: Members): string {
+  const lista = (xs: string[]) => (xs.length ? "\n" + xs.map((x) => `  - ${x}`).join("\n") : " []");
+  return `# Papéis na squad. Use e-mails (contas do Squad Console) ou logins do GitHub.
+# O Squad Console administra este arquivo em Configuração → Equipe e papéis.
+#
+# operadores: aprovam gates G1/G2/G3, fazem merge, alteram configuração e segredos
+# membros:    abrem pedidos e acionam agentes
+# leitores:   só visualizam
+#
+# Se a lista de operadores estiver vazia, administradores do console atuam como operadores.
+operadores:${lista(m.operadores)}
+membros:${lista(m.membros)}
+leitores:${lista(m.leitores)}
+`;
+}
+
+/** Coloca (ou tira, com role=null) um e-mail em exatamente uma lista. */
+export function setMemberRole(m: Members, email: string, role: Role | null): Members {
+  const e = email.trim().toLowerCase();
+  const sem = (xs: string[]) => xs.filter((x) => x !== e);
+  const out: Members = { operadores: sem(m.operadores), membros: sem(m.membros), leitores: sem(m.leitores) };
+  if (role === "operador") out.operadores.push(e);
+  if (role === "membro") out.membros.push(e);
+  if (role === "leitor") out.leitores.push(e);
+  return out;
 }
 
 export function can(role: Role, action: "ver" | "acionar" | "aprovar" | "configurar"): boolean {

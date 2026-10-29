@@ -1,15 +1,52 @@
 import "server-only";
+import { createAppAuth } from "@octokit/auth-app";
 import { Octokit } from "@octokit/rest";
+import { env } from "./env";
 
 export type GH = Octokit;
 
-export function gh(token: string): GH {
-  return new Octokit({
-    auth: token,
-    userAgent: "agentic-squad-console",
-    // GitHub Enterprise Server: defina GITHUB_API_URL (ex.: https://github.empresa.com/api/v3)
-    ...(process.env.GITHUB_API_URL ? { baseUrl: process.env.GITHUB_API_URL.replace(/\/$/, "") } : {}),
+const base = () => (env.githubApiUrl ? { baseUrl: env.githubApiUrl } : {});
+
+type AppState = { installationId: number; slug: string; octokit: Octokit; at: number };
+const g = globalThis as unknown as { __squadApp?: Promise<AppState> };
+
+async function init(): Promise<AppState> {
+  const appId = env.githubAppId;
+  const privateKey = env.githubAppPrivateKey;
+  // autenticado como o próprio App (JWT): descobre a instalação na organização
+  const asApp = new Octokit({ authStrategy: createAppAuth, auth: { appId, privateKey }, userAgent: "squad-console", ...base() });
+  const [app, inst] = await Promise.all([
+    asApp.apps.getAuthenticated(),
+    asApp.apps.getOrgInstallation({ org: env.githubOrg }).catch((e) => {
+      if (status(e) === 404)
+        throw new Error(`O GitHub App não está instalado na organização ${env.githubOrg}. Instale-o em Settings → GitHub Apps.`);
+      throw e;
+    }),
+  ]);
+  const octokit = new Octokit({
+    authStrategy: createAppAuth,
+    auth: { appId, privateKey, installationId: inst.data.id },
+    userAgent: "squad-console",
+    ...base(),
   });
+  return { installationId: inst.data.id, slug: app.data?.slug ?? "squad-console", octokit, at: Date.now() };
+}
+
+/** Cliente da API do GitHub autenticado como a instalação do App na organização (token renovado sozinho). */
+export async function gh(): Promise<GH> {
+  if (!g.__squadApp) {
+    g.__squadApp = init().catch((e) => {
+      g.__squadApp = undefined;
+      throw e;
+    });
+  }
+  return (await g.__squadApp).octokit;
+}
+
+/** Login do bot do App, como aparece em github.actor nos workflows. */
+export async function appBotLogin(): Promise<string> {
+  await gh();
+  return `${(await g.__squadApp!).slug}[bot]`;
 }
 
 export type FileContent = { content: string; sha: string; path: string };
@@ -59,9 +96,9 @@ export function status(e: unknown): number | undefined {
 export function errMsg(e: unknown): string {
   const s = status(e);
   const raw = e instanceof Error ? e.message : String(e);
-  if (s === 401) return "Sua sessão do GitHub expirou. Saia e entre novamente.";
-  if (s === 403) return `O GitHub negou a operação (permissão insuficiente ou limite de requisições). Detalhe: ${raw}`;
-  if (s === 404) return "Recurso não encontrado no GitHub (ou você não tem acesso a ele).";
+  if (s === 401) return "O GitHub App não conseguiu se autenticar. Confira GITHUB_APP_ID e GITHUB_APP_PRIVATE_KEY.";
+  if (s === 403) return `O GitHub negou a operação (permissão do App insuficiente ou limite de requisições). Detalhe: ${raw}`;
+  if (s === 404) return "Recurso não encontrado no GitHub (ou o App não tem acesso a ele).";
   if (s === 409) return "Conflito: o arquivo mudou enquanto você editava. Recarregue a página e tente de novo.";
   if (s === 422) return `O GitHub recusou os dados enviados. Detalhe: ${raw}`;
   return raw;

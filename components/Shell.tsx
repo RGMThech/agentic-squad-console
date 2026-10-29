@@ -1,9 +1,15 @@
 import Link from "next/link";
+import { BRAND } from "@/lib/brand";
 import type { User } from "@/lib/session";
 import { IconLayers, IconLogout } from "./Icons";
 import { NavLink } from "./NavLink";
 
 export type NavItem = { href: string; label: string; icon: React.ReactNode; exact?: boolean };
+
+export function initials(nome: string) {
+  const p = nome.trim().split(/\s+/).filter(Boolean);
+  return ((p[0]?.[0] ?? "") + (p.length > 1 ? p[p.length - 1][0] : "")).toUpperCase() || "?";
+}
 
 export function Shell({
   user,
@@ -24,14 +30,14 @@ export function Shell({
             <IconLayers size={19} />
           </span>
           <span>
-            <div className="brand-name">Squad Console</div>
-            <div className="brand-sub">NTT DATA · DATA &amp; AI</div>
+            <div className="brand-name">{BRAND.produto}</div>
+            <div className="brand-sub">{BRAND.assinatura}</div>
           </span>
         </Link>
 
         {squad && (
           <Link href="/squads" className="squad-switch" title="Trocar de squad">
-            <small>{squad.cliente || `${squad.owner}`}</small>
+            <small>{squad.cliente || squad.owner}</small>
             {squad.nome}
           </Link>
         )}
@@ -46,15 +52,12 @@ export function Shell({
         </nav>
 
         <div className="sidebar-foot">
-          {user.avatar ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={user.avatar} alt="" className="avatar" width={32} height={32} />
-          ) : (
-            <span className="avatar" />
-          )}
+          <Link href="/conta" className="avatar avatar-initials" title="Minha conta" aria-label="Minha conta">
+            {initials(user.name)}
+          </Link>
           <div className="who">
             {user.name}
-            <small>@{user.login}</small>
+            <small>{user.isAdmin ? "Administrador" : user.email}</small>
           </div>
           <form action="/api/auth/logout" method="post">
             <button className="icon-btn" title="Sair" aria-label="Sair">

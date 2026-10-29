@@ -3,10 +3,11 @@ import { ActionForm } from "@/components/ActionForm";
 import { IconBot, IconCheck, IconExternal, IconFile, IconKey, IconUsers, IconX } from "@/components/Icons";
 import { PageHead } from "@/components/Shell";
 import { RoleBadge } from "@/components/Status";
-import { mergeConfigPR, newAgent, setApiKey } from "@/lib/actions";
+import { mergeConfigPR, newAgent, setApiKey, setSquadMember } from "@/lib/actions";
+import { store } from "@/lib/db";
 import { can, parseFrontmatter } from "@/lib/core";
 import { ago, when } from "@/lib/format";
-import { listDir, readFile, status, type GH } from "@/lib/github";
+import { appBotLogin, listDir, readFile, status, type GH } from "@/lib/github";
 import { getSquad, type SquadParams } from "@/lib/page";
 import { apiKeyStatus, listSquadPRs } from "@/lib/squad";
 
@@ -20,14 +21,17 @@ export default async function ConfigPage({ params, searchParams }: { params: Squ
   const operador = can(ctx.role, "configurar");
   const edit = (p: string) => `${b}/config/edit?path=${encodeURIComponent(p)}`;
 
-  const [agentFiles, skillDirs, key, configPRs, workflow, protecao] = await Promise.all([
+  const [agentFiles, skillDirs, key, configPRs, workflow, protecao, usuarios, bot] = await Promise.all([
     listDir(ctx.o, owner, repo, ".claude/agents", ctx.defaultBranch),
     listDir(ctx.o, owner, repo, ".claude/skills", ctx.defaultBranch),
     operador ? apiKeyStatus(ctx) : Promise.resolve(null),
     listSquadPRs(ctx, "config/").then((l) => l.filter((p) => p.state === "open")),
     readFile(ctx.o, owner, repo, ".github/workflows/squad-agent.yml", ctx.defaultBranch),
     protecaoDaBranch(ctx.o, owner, repo, ctx.defaultBranch),
+    store().then((s) => s.listUsers()),
+    appBotLogin(),
   ]);
+  const contas = new Map(usuarios.map((u) => [u.email, u]));
 
   const agentes = await Promise.all(
     agentFiles
@@ -50,16 +54,16 @@ export default async function ConfigPage({ params, searchParams }: { params: Squ
       <PageHead
         title="Configuração da squad"
         crumbs={[{ href: b, label: ctx.config.nome || repo }, { label: "Configuração" }]}
-        subtitle={operador ? "Toda alteração vira um Pull Request no repositório da squad, com as checagens do harness." : "Somente operadores podem alterar a configuração."}
+        subtitle={operador ? "Alterações de agentes, constituição e skills viram Pull Request no repositório da squad, com as checagens do harness." : "Somente operadores podem alterar a configuração."}
       />
       <div className="content stack">
         {nova && (
           <div className="alert alert-ok">
-            Squad criada. Próximo passo: cadastre a chave da API da Anthropic abaixo e adicione o time.
+            Squad criada. Próximos passos: cadastre a chave da API da Anthropic e monte a equipe abaixo.
           </div>
         )}
 
-        <div className="grid grid-3">
+        <div className="grid grid-2">
           <div className="card card-pad stack-sm">
             <div className="row">
               <IconKey size={18} />
@@ -90,30 +94,6 @@ export default async function ConfigPage({ params, searchParams }: { params: Squ
 
           <div className="card card-pad stack-sm">
             <div className="spread">
-              <div className="row">
-                <IconUsers size={18} />
-                <h3>Equipe e papéis</h3>
-              </div>
-              {operador && (
-                <Link href={edit(".squad/members.yaml")} className="btn btn-sm">
-                  Editar
-                </Link>
-              )}
-            </div>
-            <div className="stack-sm" style={{ gap: 6 }}>
-              {membros.map((m) => (
-                <div key={m.l + m.r} className="spread small">
-                  <span>@{m.l}</span>
-                  <RoleBadge role={m.r} />
-                </div>
-              ))}
-              {membros.length === 0 && <p className="small muted">Ninguém listado. Administradores do repositório atuam como operadores.</p>}
-            </div>
-            <p className="xs muted">Seu papel: {ctx.role} · permissão no GitHub: {ctx.permission}</p>
-          </div>
-
-          <div className="card card-pad stack-sm">
-            <div className="spread">
               <h3>Squad</h3>
               {operador && (
                 <Link href={edit(".squad/squad.yaml")} className="btn btn-sm">
@@ -136,6 +116,108 @@ export default async function ConfigPage({ params, searchParams }: { params: Squ
             ))}
           </div>
         </div>
+
+        <section className="card">
+          <div className="card-head">
+            <div className="row">
+              <IconUsers size={18} />
+              <h2>Equipe e papéis</h2>
+              <span className="badge">{membros.length}</span>
+            </div>
+            <span className="muted small">Seu papel: {ctx.role}{ctx.user.isAdmin ? " (administrador do console)" : ""}</span>
+          </div>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Pessoa</th>
+                  <th>Papel na squad</th>
+                  {operador && <th></th>}
+                </tr>
+              </thead>
+              <tbody>
+                {membros.length === 0 && (
+                  <tr>
+                    <td colSpan={3} className="muted small">Ninguém na equipe ainda. Administradores do console atuam como operadores.</td>
+                  </tr>
+                )}
+                {membros.map((m) => {
+                  const conta = contas.get(m.l);
+                  const hidden = (
+                    <>
+                      <input type="hidden" name="owner" value={owner} />
+                      <input type="hidden" name="repo" value={repo} />
+                      <input type="hidden" name="email" value={m.l} />
+                    </>
+                  );
+                  return (
+                    <tr key={m.l + m.r}>
+                      <td>
+                        <div className="feature-title">{conta?.name || m.l}</div>
+                        <div className="xs muted">
+                          {conta?.name ? m.l : ""}
+                          {!m.l.includes("@") ? " · login do GitHub (disparo manual)" : !conta ? " · sem conta no console" : conta.status !== "ativo" ? " · conta desativada" : ""}
+                        </div>
+                      </td>
+                      <td>
+                        {operador ? (
+                          <ActionForm action={setSquadMember} submit="Salvar" variant="default" className="row inline-form">
+                            {hidden}
+                            <select name="papel" className="select select-sm" defaultValue={m.r} aria-label={`Papel de ${m.l}`}>
+                              <option value="operador">Operador</option>
+                              <option value="membro">Membro</option>
+                              <option value="leitor">Leitor</option>
+                            </select>
+                          </ActionForm>
+                        ) : (
+                          <RoleBadge role={m.r} />
+                        )}
+                      </td>
+                      {operador && (
+                        <td>
+                          <ActionForm action={setSquadMember} submit="Remover" variant="danger" className="row inline-form" confirm={`Remover ${m.l} da squad?`}>
+                            {hidden}
+                            <input type="hidden" name="papel" value="remover" />
+                          </ActionForm>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {operador && (
+            <div className="card-pad" style={{ borderTop: "1px solid var(--line)" }}>
+              <ActionForm action={setSquadMember} submit="Adicionar à equipe" resetOnOk className="form team-add">
+                <input type="hidden" name="owner" value={owner} />
+                <input type="hidden" name="repo" value={repo} />
+                <div className="field">
+                  <label htmlFor="tm-email">E-mail</label>
+                  <input id="tm-email" name="email" type="email" className="input" required list="contas-console" placeholder="pessoa@empresa.com.br" />
+                  <datalist id="contas-console">
+                    {[...contas.values()].filter((c) => c.status === "ativo" && !membros.some((m) => m.l === c.email)).map((c) => (
+                      <option key={c.email} value={c.email}>{c.name}</option>
+                    ))}
+                  </datalist>
+                </div>
+                <div className="field">
+                  <label htmlFor="tm-papel">Papel</label>
+                  <select id="tm-papel" name="papel" className="select" defaultValue="membro">
+                    <option value="operador">Operador — aprova gates e configura</option>
+                    <option value="membro">Membro — abre features e aciona agentes</option>
+                    <option value="leitor">Leitor — só visualiza</option>
+                  </select>
+                </div>
+                {ctx.user.isAdmin && (
+                  <label className="check">
+                    <input type="checkbox" name="convidar" defaultChecked /> Se ainda não tiver conta, convidar para o console
+                  </label>
+                )}
+              </ActionForm>
+            </div>
+          )}
+        </section>
 
         <section className="card">
           <div className="card-head">
@@ -205,6 +287,11 @@ export default async function ConfigPage({ params, searchParams }: { params: Squ
           <section className="stack">
             <div className="card card-pad stack-sm">
               <h2>Saúde da instalação</h2>
+              <Health
+                ok={ctx.config.console_bot.toLowerCase() === bot.toLowerCase()}
+                t="Bot do console em .squad/squad.yaml"
+                d={ctx.config.console_bot.toLowerCase() === bot.toLowerCase() ? bot : `ajuste console_bot para ${bot} — sem isso, execuções pedidas pelo console são recusadas`}
+              />
               <Health ok={Boolean(workflow)} t="Workflow squad-agent" d={workflow ? "presente na branch principal" : "ausente: atualize a partir do template"} />
               <Health ok={protecao === "ativa"} t="Proteção da branch principal" d={protecao === "ativa" ? "ativa" : protecao === "ausente" ? "ausente: exija PR e a checagem squad-gates" : "não foi possível verificar"} />
               {operador && <Health ok={Boolean(key?.set)} t="Chave da API" d={key?.set ? "configurada" : "pendente"} />}
@@ -221,7 +308,7 @@ export default async function ConfigPage({ params, searchParams }: { params: Squ
                   <a href={p.url} target="_blank" rel="noreferrer">
                     #{p.number} {p.title}
                     <div className="xs muted">
-                      @{p.author} · {when(p.updatedAt)}
+                      {p.author} · {when(p.updatedAt)}
                     </div>
                   </a>
                   {operador && (

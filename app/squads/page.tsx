@@ -4,7 +4,6 @@ import { PageHead } from "@/components/Shell";
 import { env } from "@/lib/env";
 import { ago } from "@/lib/format";
 import { errMsg } from "@/lib/github";
-import { reauthIf401 } from "@/lib/page";
 import { requireUser } from "@/lib/session";
 import { listSquads, type SquadSummary } from "@/lib/squad";
 
@@ -17,19 +16,24 @@ export default async function SquadsPage() {
   try {
     squads = await listSquads(user);
   } catch (e) {
-    reauthIf401(e, "/squads");
     erro = errMsg(e);
   }
 
   return (
     <>
       <PageHead
-        title="Suas squads"
-        subtitle={`Repositórios do GitHub com o tópico "${env.topic}" aos quais você tem acesso.`}
+        title={user.isAdmin ? "Squads" : "Suas squads"}
+        subtitle={
+          user.isAdmin
+            ? `Todas as squads da organização ${env.githubOrg}.`
+            : "Squads em que você faz parte da equipe."
+        }
         actions={
-          <Link href="/squads/new" className="btn btn-primary">
-            <IconPlus size={16} /> Nova squad
-          </Link>
+          user.isAdmin && (
+            <Link href="/squads/new" className="btn btn-primary">
+              <IconPlus size={16} /> Nova squad
+            </Link>
+          )
         }
       />
       <div className="content">
@@ -39,13 +43,17 @@ export default async function SquadsPage() {
             <div className="ic">
               <IconLayers size={26} />
             </div>
-            <h2>Nenhuma squad encontrada</h2>
+            <h2>Nenhuma squad por aqui</h2>
             <p className="muted" style={{ margin: "8px auto 20px", maxWidth: 480 }}>
-              Crie uma squad a partir do template, ou adicione o tópico <code>{env.topic}</code> a um repositório existente que siga o template.
+              {user.isAdmin
+                ? "Crie a primeira squad a partir do template."
+                : "Você ainda não faz parte da equipe de nenhuma squad. Peça a um operador para incluir seu e-mail."}
             </p>
-            <Link href="/squads/new" className="btn btn-primary">
-              Criar a primeira squad
-            </Link>
+            {user.isAdmin && (
+              <Link href="/squads/new" className="btn btn-primary">
+                Criar a primeira squad
+              </Link>
+            )}
           </div>
         )}
         <div className="grid grid-3">

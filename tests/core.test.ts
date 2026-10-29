@@ -12,6 +12,8 @@ import {
   parseRunTitle,
   parseTasks,
   resolveRole,
+  serializeMembers,
+  setMemberRole,
   setFrontmatter,
   slugify,
   validateConfigContent,
@@ -85,13 +87,24 @@ test("ids: próximo número e slug sem acento", () => {
   assert.equal(nextFeatureId([], "Nova"), "001-nova");
 });
 
-test("papéis: membros.yaml + permissão do GitHub", () => {
-  const m = parseMembers("operadores:\n  - mellrodrigo\nmembros: ['@ana']\nleitores: []\n");
-  assert.equal(resolveRole("mellrodrigo", m, "admin"), "operador");
-  assert.equal(resolveRole("mellrodrigo", m, "read"), "leitor");
-  assert.equal(resolveRole("ana", m, "write"), "membro");
-  assert.equal(resolveRole("joao", m, "admin"), "leitor");
-  assert.equal(resolveRole("joao", parseMembers("operadores: []"), "admin"), "operador");
+test("papéis: por e-mail, sem diferenciar maiúsculas; quem não está listado não acessa", () => {
+  const m = parseMembers("operadores:\n  - Ana@RGMtech.com.br\nmembros: ['@joao@rgmtech.com.br', mellrodrigo]\nleitores: [cliente@empresa.com]\n");
+  assert.deepEqual(m.operadores, ["ana@rgmtech.com.br"]);
+  assert.equal(resolveRole("ana@rgmtech.com.br", m, false), "operador");
+  assert.equal(resolveRole("JOAO@rgmtech.com.br", m, false), "membro");
+  assert.equal(resolveRole("cliente@empresa.com", m, false), "leitor");
+  assert.equal(resolveRole("estranho@x.com", m, false), null);
+  assert.equal(resolveRole("estranho@x.com", m, true), "operador");
+});
+
+test("equipe: mudar papel e remover mantém uma lista por pessoa", () => {
+  const m = parseMembers("operadores: [ana@x.com]\nmembros: [joao@x.com]\nleitores: []\n");
+  const promovido = setMemberRole(m, "JOAO@x.com", "operador");
+  assert.deepEqual(promovido, { operadores: ["ana@x.com", "joao@x.com"], membros: [], leitores: [] });
+  const removido = setMemberRole(promovido, "ana@x.com", null);
+  assert.deepEqual(removido.operadores, ["joao@x.com"]);
+  assert.deepEqual(parseMembers(serializeMembers(removido)), removido);
+  assert.match(serializeMembers({ operadores: [], membros: [], leitores: [] }), /operadores: \[\]/);
 });
 
 test("gates: progressão completa", () => {

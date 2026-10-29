@@ -141,7 +141,7 @@ export default async function RunsPage({ params }: { params: SquadParams }) {
                       <td className="small">
                         <Link href={`${b}/f/${r.feature}`} className="mono xs">{r.feature}</Link>
                       </td>
-                      <td className="small">@{r.ator}</td>
+                      <td className="small">{r.ator}</td>
                       <td>
                         <RunBadge run={r} />
                       </td>

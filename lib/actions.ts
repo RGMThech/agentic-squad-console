@@ -4,7 +4,10 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import sodium from "libsodium-wrappers";
 import { env } from "./env";
-import { errMsg, readFile, status, writeFile } from "./github";
+import { appBotLogin, errMsg, gh, readFile, status, writeFile } from "./github";
+import { store } from "./db";
+import { sendInvite } from "./mail";
+import { isValidEmail, normalizeEmail } from "./otp";
 import { requireUser } from "./session";
 import { listFeatureIds, listSquadPRs, loadFeature, loadSquad, prChecks, type SquadContext } from "./squad";
 import {
@@ -15,6 +18,9 @@ import {
   isEditablePath,
   nextFeatureId,
   setFrontmatter,
+  serializeMembers,
+  setMemberRole,
+  type Role,
   slugify,
   todaySaoPaulo,
   validateConfigContent,
@@ -42,6 +48,10 @@ async function ctxFrom(fd: FormData, need: "acionar" | "aprovar" | "configurar")
   return ctx;
 }
 
+function quem(ctx: SquadContext) {
+  return `${ctx.user.name} <${ctx.user.email}>`;
+}
+
 function base(ctx: SquadContext) {
   return `/s/${ctx.owner}/${ctx.repo}`;
 }
@@ -57,7 +67,7 @@ async function dispatch(ctx: SquadContext, agente: string, feature: string, inst
       repo: ctx.repo,
       workflow_id: "squad-agent.yml",
       ref: ctx.defaultBranch,
-      inputs: { agente, feature, instrucao: instrucao.slice(0, MAX_INSTRUCAO) },
+      inputs: { agente, feature, instrucao: instrucao.slice(0, MAX_INSTRUCAO), solicitante: ctx.user.email },
     });
   } catch (e) {
     if (status(e) === 404) throw new Error("Workflow squad-agent.yml não encontrado na branch principal da squad.");
@@ -95,7 +105,7 @@ export async function createFeature(_: ActionState, fd: FormData): Promise<Actio
       .filter(([, v]) => v)
       .map(([k, v]) => `**${k}:** ${v}`)
       .join("\n");
-    const instrucao = `Crie a spec da feature ${feature} (specs/${feature}/spec.md, id ${feature.slice(0, 3)}) a partir deste pedido de @${ctx.user.login}. Liste todas as dúvidas em "Dúvidas abertas" e deixe status: em_revisao.\n\n${pedido}`;
+    const instrucao = `Crie a spec da feature ${feature} (specs/${feature}/spec.md, id ${feature.slice(0, 3)}) a partir deste pedido de ${quem(ctx)}. Liste todas as dúvidas em "Dúvidas abertas" e deixe status: em_revisao.\n\n${pedido}`;
     await dispatch(ctx, "analista-requisitos", feature, instrucao);
     destino = `${base(ctx)}/f/${feature}?novo=1`;
   } catch (e) {
@@ -144,7 +154,7 @@ export async function approveGate(_: ActionState, fd: FormData): Promise<ActionS
 
     const novo = setFrontmatter(doc.raw, {
       status: "aprovado",
-      aprovado_por: ctx.user.login,
+      aprovado_por: ctx.user.email,
       aprovado_em: todaySaoPaulo(),
     });
     await writeFile(ctx.o, {
@@ -154,16 +164,16 @@ export async function approveGate(_: ActionState, fd: FormData): Promise<ActionS
       branch: f.branch,
       sha: doc.sha,
       content: novo,
-      message: `gate(${gate}): ${gate === "G1" ? "spec" : "design"} de ${feature} aprovad${gate === "G1" ? "a" : "o"} por @${ctx.user.login}`,
+      message: `gate(${gate}): ${gate === "G1" ? "spec" : "design"} de ${feature} aprovad${gate === "G1" ? "a" : "o"} por ${quem(ctx)}`,
     });
-    await comment(ctx, f.pr?.number, `🧍 **${gate} aprovado** por @${ctx.user.login} no Console da Squad.`);
+    await comment(ctx, f.pr?.number, `🧍 **${gate} aprovado** por ${quem(ctx)} no Console da Squad.`);
 
     let extra = "";
     if (auto) {
       const [agente, instrucao] =
         gate === "G1"
-          ? ["arquiteto-dados", `A spec de ${feature} foi aprovada no G1 por @${ctx.user.login}. Produza specs/${feature}/design.md, os contratos e ADRs necessários e deixe status: em_revisao.`]
-          : ["orquestrador", `Spec e design de ${feature} aprovados (G2 por @${ctx.user.login}). Gere tasks.md e conduza implementação, QA, revisão e documentação até o G3 ficar pronto.`];
+          ? ["arquiteto-dados", `A spec de ${feature} foi aprovada no G1 por ${quem(ctx)}. Produza specs/${feature}/design.md, os contratos e ADRs necessários e deixe status: em_revisao.`]
+          : ["orquestrador", `Spec e design de ${feature} aprovados (G2 por ${quem(ctx)}). Gere tasks.md e conduza implementação, QA, revisão e documentação até o G3 ficar pronto.`];
       await dispatch(ctx, agente, feature, instrucao);
       extra = ` ${agente} acionado.`;
     }
@@ -184,12 +194,12 @@ export async function requestChanges(_: ActionState, fd: FormData): Promise<Acti
     const agente = gate === "G1" ? "analista-requisitos" : gate === "G2" ? "arquiteto-dados" : "orquestrador";
     const prs = await listSquadPRs(ctx);
     const f = await loadFeature(ctx, feature, true, prs);
-    await comment(ctx, f.pr?.number, `🧍 **Ajustes solicitados no ${gate}** por @${ctx.user.login}:\n\n${feedback}`);
+    await comment(ctx, f.pr?.number, `🧍 **Ajustes solicitados no ${gate}** por ${quem(ctx)}:\n\n${feedback}`);
     await dispatch(
       ctx,
       agente,
       feature,
-      `O Operador @${ctx.user.login} pediu ajustes no ${gate} da feature ${feature}. Trate cada ponto, atualize os artefatos e mantenha status: em_revisao.\n\nAjustes solicitados:\n${feedback}`,
+      `O Operador ${quem(ctx)} pediu ajustes no ${gate} da feature ${feature}. Trate cada ponto, atualize os artefatos e mantenha status: em_revisao.\n\nAjustes solicitados:\n${feedback}`,
     );
     revalidatePath(`${base(ctx)}/f/${feature}`);
     return { ok: true, message: `Ajustes enviados para ${agente}.` };
@@ -218,14 +228,14 @@ export async function approveG3(_: ActionState, fd: FormData): Promise<ActionSta
         { id: f.pr.nodeId },
       );
     }
-    if (f.pr.author !== ctx.user.login) {
+    {
       await ctx.o.pulls
         .createReview({
           owner: ctx.owner,
           repo: ctx.repo,
           pull_number: f.pr.number,
           event: "APPROVE",
-          body: `🧍 G3 aprovado por @${ctx.user.login} no Console da Squad.`,
+          body: `🧍 G3 aprovado por ${quem(ctx)} no Console da Squad.`,
         })
         .catch(() => undefined);
     }
@@ -234,7 +244,7 @@ export async function approveG3(_: ActionState, fd: FormData): Promise<ActionSta
       repo: ctx.repo,
       pull_number: f.pr.number,
       merge_method: "squash",
-      commit_title: `${feature}: G3 aprovado por @${ctx.user.login} (#${f.pr.number})`,
+      commit_title: `${feature}: G3 aprovado por ${quem(ctx)} (#${f.pr.number})`,
     });
     revalidatePath(base(ctx));
     return { ok: true, message: "G3 aprovado: PR mesclado na branch principal. O CI/CD segue daqui." };
@@ -279,7 +289,7 @@ export async function saveConfigFile(_: ActionState, fd: FormData): Promise<Acti
       head: branch,
       base: ctx.defaultBranch,
       title: `config: ${motivo}`,
-      body: `Alteração de configuração da squad feita por @${ctx.user.login} no Console da Squad.\n\nArquivo: \`${path}\``,
+      body: `Alteração de configuração da squad feita por ${quem(ctx)} no Console da Squad.\n\nArquivo: \`${path}\``,
     });
 
     if (aplicar) {
@@ -361,14 +371,15 @@ export async function createSquad(_: ActionState, fd: FormData): Promise<ActionS
   let destino = "";
   try {
     const user = await requireUser();
-    const o = (await import("./github")).gh(user.token);
-    const owner = str(fd, "owner", 100);
+    if (!user.isAdmin) return { error: "Somente administradores do console podem criar squads." };
+    const o = await gh();
+    const owner = env.githubOrg;
     const nome = slugify(str(fd, "nome", 80), 80);
     const cliente = str(fd, "cliente", 120);
     const descricao = str(fd, "descricao", 300);
     const plataforma = str(fd, "plataforma", 30) || "agnostico";
     const modelo = str(fd, "modelo", 60) || "sonnet";
-    if (!RE_NAME.test(owner) || !RE_NAME.test(nome)) return { error: "Dono ou nome do repositório inválido." };
+    if (!RE_NAME.test(nome) || nome.length < 3) return { error: "Nome do repositório inválido (mínimo 3 caracteres: letras, números e hífen)." };
     const [tOwner, tRepo] = env.templateRepo.split("/");
     if (!tOwner || !tRepo) return { error: `SQUAD_TEMPLATE_REPO inválido ("${env.templateRepo}"). Use o formato dono/repositorio.` };
 
@@ -378,33 +389,13 @@ export async function createSquad(_: ActionState, fd: FormData): Promise<ActionS
       template = (await o.repos.get({ owner: tOwner, repo: tRepo })).data;
     } catch (e) {
       if (status(e) === 404)
-        return {
-          error: `Não consigo acessar o template ${env.templateRepo}. Confira a variável SQUAD_TEMPLATE_REPO e se sua conta tem acesso a esse repositório.`,
-        };
+        return { error: `O GitHub App não acessa o template ${env.templateRepo}. Confira SQUAD_TEMPLATE_REPO e se o App está instalado com acesso a esse repositório.` };
       throw e;
     }
     if (template.full_name.toLowerCase() !== env.templateRepo.toLowerCase())
-      return {
-        error: `O template mudou de endereço: agora é ${template.full_name}. Atualize a variável SQUAD_TEMPLATE_REPO para esse valor.`,
-      };
+      return { error: `O template mudou de endereço: agora é ${template.full_name}. Atualize a variável SQUAD_TEMPLATE_REPO.` };
     if (!template.is_template)
-      return {
-        error: `O repositório ${template.full_name} ainda não está marcado como template. No GitHub: Settings → marque "Template repository" e tente de novo.`,
-      };
-
-    if (owner.toLowerCase() !== user.login.toLowerCase()) {
-      try {
-        const m = (await o.orgs.getMembershipForAuthenticatedUser({ org: owner })).data;
-        if (m.state !== "active") return { error: `Seu convite para a organização ${owner} ainda está pendente no GitHub.` };
-      } catch (e) {
-        if (status(e) === 404 || status(e) === 403)
-          return {
-            error: `O console não tem acesso à organização ${owner}. Saia, entre de novo e, na tela de autorização do GitHub, clique em "Grant" ao lado de ${owner} (ou aprove o OAuth App em Settings → Third-party access da organização).`,
-          };
-        throw e;
-      }
-    }
-
+      return { error: `O repositório ${template.full_name} ainda não está marcado como template. No GitHub: Settings → marque "Template repository".` };
     const existente = await o.repos.get({ owner, repo: nome }).then(() => true).catch((e) => (status(e) === 404 ? false : Promise.reject(e)));
     if (existente) return { error: `Já existe um repositório ${owner}/${nome}. Escolha outro nome.` };
 
@@ -419,10 +410,8 @@ export async function createSquad(_: ActionState, fd: FormData): Promise<ActionS
       });
     } catch (e) {
       const msg = errMsg(e);
-      if (status(e) === 422 && /template/i.test(msg))
-        return { error: `O repositório ${env.templateRepo} não está marcado como Template no GitHub (Settings → Template repository).` };
-      if (status(e) === 404 || status(e) === 403)
-        return { error: `O GitHub não deixou criar ${owner}/${nome}. Verifique se você pode criar repositórios em ${owner} (permissão de membro da organização). Detalhe: ${msg}` };
+      if (status(e) === 403 || status(e) === 404)
+        return { error: `O GitHub App não tem permissão para criar repositórios em ${owner}. Dê ao App a permissão "Administration: Read and write" e instale-o em "All repositories". Detalhe: ${msg}` };
       return { error: `Falha ao criar o repositório: ${msg}` };
     }
 
@@ -436,42 +425,107 @@ export async function createSquad(_: ActionState, fd: FormData): Promise<ActionS
 
     let etapa = "ler o repositório criado";
     try {
-    const repoInfo = (await o.repos.get({ owner, repo: nome })).data;
-    etapa = "adicionar o tópico";
-    await o.repos.replaceAllTopics({ owner, repo: nome, names: [env.topic] });
-
-    const yamlStr = (v: string) => JSON.stringify(v);
-    const cfg = [
-      "# Configuração da squad — lida pelo Console e pelo workflow squad-agent",
-      `nome: ${yamlStr(str(fd, "titulo", 120) || nome)}`,
-      `cliente: ${yamlStr(cliente)}`,
-      `descricao: ${yamlStr(descricao)}`,
-      `plataforma: ${slugify(plataforma, 30)}`,
-      `modelo: ${yamlStr(modelo)}`,
-      "max_turnos: 60",
-      "alerta_custo_usd: 5",
-      "",
-    ].join("\n");
-    etapa = "gravar .squad/squad.yaml";
-    await writeFile(o, {
-      owner, repo: nome, path: ".squad/squad.yaml", branch: repoInfo.default_branch,
-      sha: squadYaml.sha, content: cfg, message: "config: dados da squad",
-    });
-    etapa = "gravar .squad/members.yaml";
-    const mem = await readFile(o, owner, nome, ".squad/members.yaml");
-    await writeFile(o, {
-      owner, repo: nome, path: ".squad/members.yaml", branch: repoInfo.default_branch, sha: mem?.sha,
-      message: "config: operador inicial",
-      content: `# Papéis na squad (logins do GitHub). Veja AGENTS.md.\noperadores:\n  - ${user.login}\nmembros: []\nleitores: []\n`,
-    });
+      const repoInfo = (await o.repos.get({ owner, repo: nome })).data;
+      etapa = "adicionar o tópico";
+      await o.repos.replaceAllTopics({ owner, repo: nome, names: [env.topic] });
+      const yamlStr = (v: string) => JSON.stringify(v);
+      const cfg = [
+        "# Configuração da squad — lida pelo Console e pelo workflow squad-agent",
+        `nome: ${yamlStr(str(fd, "titulo", 120) || nome)}`,
+        `cliente: ${yamlStr(cliente)}`,
+        `descricao: ${yamlStr(descricao)}`,
+        `plataforma: ${slugify(plataforma, 30)}`,
+        `modelo: ${yamlStr(modelo)}`,
+        "max_turnos: 60",
+        "alerta_custo_usd: 5",
+        `console_bot: ${yamlStr(await appBotLogin())}   # bot do GitHub App do Squad Console`,
+        "",
+      ].join("\n");
+      etapa = "gravar .squad/squad.yaml";
+      await writeFile(o, {
+        owner, repo: nome, path: ".squad/squad.yaml", branch: repoInfo.default_branch,
+        sha: squadYaml.sha, content: cfg, message: "config: dados da squad",
+      });
+      etapa = "gravar .squad/members.yaml";
+      const mem = await readFile(o, owner, nome, ".squad/members.yaml");
+      await writeFile(o, {
+        owner, repo: nome, path: ".squad/members.yaml", branch: repoInfo.default_branch, sha: mem?.sha,
+        message: `config: operador inicial (${user.email})`,
+        content: serializeMembers({ operadores: [user.email], membros: [], leitores: [] }),
+      });
     } catch (e) {
-      return {
-        error: `O repositório ${owner}/${nome} foi criado, mas falhou ao ${etapa}: ${errMsg(e)}. Conclua em Configuração ou ajuste direto no GitHub.`,
-      };
+      return { error: `O repositório ${owner}/${nome} foi criado, mas falhou ao ${etapa}: ${errMsg(e)}. Conclua em Configuração ou ajuste direto no GitHub.` };
     }
+    await (await store()).audit({ actor: user.email, action: "squad.criar", target: `${owner}/${nome}` });
     destino = `/s/${owner}/${nome}/config?nova=1`;
   } catch (e) {
     return { error: errMsg(e) };
   }
   redirect(destino);
+}
+
+// ---------------------------------------------------------------- equipe da squad
+
+async function commitDiretoOuPR(ctx: SquadContext, path: string, content: string, motivo: string) {
+  const atual = await readFile(ctx.o, ctx.owner, ctx.repo, path, ctx.defaultBranch);
+  try {
+    await writeFile(ctx.o, {
+      owner: ctx.owner, repo: ctx.repo, path, branch: ctx.defaultBranch, sha: atual?.sha, content,
+      message: `config: ${motivo}`,
+    });
+    return { direto: true as const };
+  } catch (e) {
+    const s = status(e);
+    if (s !== 409 && s !== 422 && s !== 403) throw e;
+    // branch protegida: segue pelo caminho do Pull Request
+    const head = await ctx.o.repos.getBranch({ owner: ctx.owner, repo: ctx.repo, branch: ctx.defaultBranch });
+    const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
+    const branch = `config/${stamp}-${slugify(path, 30)}`;
+    await ctx.o.git.createRef({ owner: ctx.owner, repo: ctx.repo, ref: `refs/heads/${branch}`, sha: head.data.commit.sha });
+    await writeFile(ctx.o, { owner: ctx.owner, repo: ctx.repo, path, branch, sha: atual?.sha, content, message: `config: ${motivo}` });
+    const pr = await ctx.o.pulls.create({
+      owner: ctx.owner, repo: ctx.repo, head: branch, base: ctx.defaultBranch, title: `config: ${motivo}`,
+      body: `Alteração feita por ${quem(ctx)} no Squad Console.\n\nA branch principal é protegida; para alterações de equipe entrarem na hora, adicione o GitHub App do console à lista de bypass do ruleset.`,
+    });
+    return { direto: false as const, url: pr.data.html_url };
+  }
+}
+
+/** Adiciona, muda o papel ou remove alguém da squad (por e-mail). */
+export async function setSquadMember(_: ActionState, fd: FormData): Promise<ActionState> {
+  try {
+    const ctx = await ctxFrom(fd, "configurar");
+    const email = normalizeEmail(String(fd.get("email") ?? ""));
+    const papel = String(fd.get("papel") ?? "");
+    const role = (["operador", "membro", "leitor"].includes(papel) ? papel : null) as Role | null;
+    if (!isValidEmail(email)) return { error: "Informe um e-mail válido." };
+    if (papel !== "remover" && !role) return { error: "Escolha o papel." };
+
+    const db = await store();
+    let conta = await db.findUserByEmail(email);
+    if (!conta && role) {
+      if (!ctx.user.isAdmin) return { error: "Este e-mail ainda não tem conta no console. Peça a um administrador para convidá-lo." };
+      if (fd.get("convidar") !== "on") return { error: "Este e-mail ainda não tem conta. Marque \"convidar\" para criar a conta e enviar o convite." };
+      conta = await db.createUser({ email, name: "", role: "usuario", invitedBy: ctx.user.email });
+      await sendInvite(email, "", ctx.user.name).catch((e) => console.error("[convite]", (e as Error).message));
+      await db.audit({ actor: ctx.user.email, action: "usuario.convidar", target: `${email} (via ${ctx.owner}/${ctx.repo})` });
+    }
+
+    const novo = setMemberRole(ctx.members, email, role);
+    if (!novo.operadores.length && !role) {
+      const sobra = ctx.members.operadores.filter((x) => x !== email);
+      if (!sobra.length) return { error: "A squad precisa de pelo menos um operador." };
+    }
+    if (!novo.operadores.length) return { error: "A squad precisa de pelo menos um operador." };
+
+    const motivo = role ? `${email} como ${role}` : `remove ${email}`;
+    const r = await commitDiretoOuPR(ctx, ".squad/members.yaml", serializeMembers(novo), `equipe — ${motivo}`);
+    await db.audit({ actor: ctx.user.email, action: role ? "squad.membro" : "squad.remover_membro", target: `${ctx.owner}/${ctx.repo}: ${motivo}` });
+    revalidatePath(`${base(ctx)}/config`);
+    return r.direto
+      ? { ok: true, message: role ? `${email} agora é ${role} desta squad.` : `${email} saiu da squad.` }
+      : { ok: true, message: "A branch principal é protegida: abri um Pull Request com a alteração.", url: r.url };
+  } catch (e) {
+    return { error: errMsg(e) };
+  }
 }

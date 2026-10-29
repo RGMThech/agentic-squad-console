@@ -291,7 +291,7 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
                 <div className="spread">
                   <span className="muted">G1 por</span>
                   <span>
-                    @{f.spec.data.aprovado_por} · {f.spec.data.aprovado_em}
+                    {f.spec.data.aprovado_por} · {f.spec.data.aprovado_em}
                   </span>
                 </div>
               )}
@@ -299,7 +299,7 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
                 <div className="spread">
                   <span className="muted">G2 por</span>
                   <span>
-                    @{f.design.data.aprovado_por} · {f.design.data.aprovado_em}
+                    {f.design.data.aprovado_por} · {f.design.data.aprovado_em}
                   </span>
                 </div>
               )}
@@ -405,7 +405,7 @@ function RunsList({ runs }: { runs: Run[] }) {
             <div className="row" style={{ gap: 8 }}>
               <b>{r.agente}</b>
               <span className="xs muted">
-                @{r.ator} · {when(r.createdAt)}
+                {r.ator} · {when(r.createdAt)}
               </span>
             </div>
             <div className="xs muted">

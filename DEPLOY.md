@@ -1,117 +1,178 @@
-# Deploy na Hostinger (plano Business / Cloud)
+# Implantação na Hostinger (plano Business / Cloud)
 
-O console é um app **Next.js (Node.js)**. Nos planos Business e Cloud, a Hostinger tem suporte nativo a apps Node.js: faz o deploy a partir do GitHub, roda o build a cada push e permite configurar variáveis de ambiente pelo hPanel.
+O Squad Console é um app **Next.js (Node.js)** com três peças externas:
+
+| Peça | Para quê | Onde |
+|------|----------|------|
+| **MySQL** | contas, códigos de login, auditoria | banco da própria Hostinger |
+| **SMTP** | envio dos códigos e dos convites | e-mail da própria Hostinger |
+| **GitHub App** | o console falar com os repositórios das squads | organização **RGMThech** |
 
 Endereço de produção: **https://iadasilva.com.br**
 
-> Os nomes exatos dos menus do hPanel podem variar um pouco. O fluxo é sempre: adicionar um *Node.js Web App*, conectar o GitHub, conferir o build e cadastrar as variáveis.
+Ninguém entra pelo GitHub. As pessoas entram com **e-mail + código de 6 dígitos**, e só quem foi convidado.
+
+> Os nomes dos menus do hPanel e do GitHub podem variar um pouco; o fluxo é o mesmo.
 
 ---
 
-## 1. Antes de começar (5 min)
+## 1. Banco de dados MySQL (hPanel)
 
-1. **Template marcado como template.** No GitHub, abra `RGMThech/agentic-data-squad` → **Settings** → marque **Template repository**. Sem isso, o botão "Nova squad" do console não funciona.
-   - Na página inicial do repositório, em **About → ⚙️**, adicione o tópico `agentic-data-squad`. O console só lista repositórios com esse tópico; as squads criadas pelo console já recebem o tópico automaticamente.
-2. **Domínio com SSL.** No hPanel, confirme que `iadasilva.com.br` aponta para a hospedagem e que o **SSL** está ativo. O login com GitHub exige HTTPS.
-3. **Actions pode abrir PRs (obrigatório).** Na organização **RGMThech** → **Settings → Actions → General → Workflow permissions**:
-   - marque **Read and write permissions**
-   - marque **Allow GitHub Actions to create and approve pull requests**
+1. hPanel → **Bancos de dados → Gerenciamento de MySQL**.
+2. Crie um banco (ex.: `squadconsole`), um usuário e uma senha forte.
+3. Anote o **host** que o hPanel mostra para o banco.
+4. Monte a `DATABASE_URL`:
 
-   Sem isso, o agente roda e commita, mas o workflow falha ao abrir o PR da feature. Confira também **Actions permissions**: o workflow usa apenas actions oficiais do GitHub (`actions/checkout`, `setup-python`, `setup-node`).
+   ```
+   mysql://USUARIO:SENHA@HOST:3306/BANCO
+   ```
 
-## 2. Criar o GitHub OAuth App
+   Se a senha tiver caracteres especiais (`@`, `:`, `/`, `#`), escreva-os codificados, por exemplo `@` → `%40`.
 
-Crie o app **dentro da organização**, para que ele pertença à RGMThech e não a uma conta pessoal:
+As tabelas (`sc_users`, `sc_login_codes`, `sc_audit`) são criadas sozinhas no primeiro acesso.
 
-GitHub → organização **RGMThech** → **Settings** → **Developer settings** → **OAuth Apps** → **New OAuth App**
+## 2. E-mail para os códigos (hPanel)
+
+1. hPanel → **E-mails** → crie a caixa `no-reply@iadasilva.com.br`.
+2. Os dados de SMTP da Hostinger são:
+
+   | Variável | Valor |
+   |----------|-------|
+   | `SMTP_HOST` | `smtp.hostinger.com` |
+   | `SMTP_PORT` | `465` |
+   | `SMTP_USER` | `no-reply@iadasilva.com.br` |
+   | `SMTP_PASS` | a senha da caixa |
+   | `MAIL_FROM` | `no-reply@iadasilva.com.br` |
+
+Para os códigos não caírem no spam, confira no hPanel se o domínio tem **SPF, DKIM e DMARC** ativos (em E-mails → Configurações de DNS).
+
+## 3. GitHub App da organização
+
+### 3.1 Criar o App
+
+GitHub → organização **RGMThech** → **Settings → Developer settings → GitHub Apps → New GitHub App**
 
 | Campo | Valor |
 |-------|-------|
-| Application name | Squad Console |
+| GitHub App name | `RGM Squad Console` (o nome vira o bot `rgm-squad-console[bot]`) |
 | Homepage URL | `https://iadasilva.com.br` |
-| Authorization callback URL | `https://iadasilva.com.br/api/auth/callback` |
+| Callback URL / Setup URL | deixe em branco |
+| Webhook | **desmarque "Active"**; o console não usa webhooks |
+| Where can this GitHub App be installed? | **Only on this account** |
 
-Depois de criar:
-- copie o **Client ID**
-- clique em **Generate a new client secret** e copie o **Client secret**
+**Repository permissions**, e nada além delas:
 
-> **Squads em outras organizações (clientes):** se a organização do cliente tiver restrição a apps de terceiros, um owner dela precisa aprovar o *Squad Console* em **Organization settings → Third-party access → OAuth app policy**. Sem essa aprovação, os repositórios daquela organização não aparecem no console.
+| Permissão | Acesso | Uso no console |
+|-----------|--------|----------------|
+| Actions | Read and write | acionar os agentes e listar execuções |
+| Administration | Read and write | criar squads a partir do template, tópicos e ler proteção da branch |
+| Checks | Read-only | ver se as checagens do PR passaram (G3) |
+| Contents | Read and write | ler specs e gravar aprovações de gates e configuração |
+| Issues | Read and write | comentários nos PRs |
+| Metadata | Read-only | obrigatória |
+| Pull requests | Read and write | abrir e mesclar PRs (G3 e configuração) |
+| Secrets | Read and write | gravar a chave da API da Anthropic de cada squad |
+| Workflows | Read and write | criar squads cujo template contém workflows |
 
-## 3. Criar o app Node.js no hPanel
+**Organization permissions:** nenhuma.
 
-1. hPanel → **Websites** → **Adicionar site** → **Node.js Web App**.
-2. Escolha **Importar do GitHub** e autorize a Hostinger. Na tela de autorização do GitHub, conceda acesso à organização **RGMThech** (botão *Grant* ao lado dela); sem isso, o repositório não aparece na lista. Selecione `RGMThech/agentic-squad-console`, branch `main`.
-3. Confira as configurações de build. O framework deve ser detectado como **Next.js**.
+### 3.2 Chave e ID
 
-   | Configuração | Valor |
-   |--------------|-------|
-   | Versão do Node.js | **22.x** |
-   | Comando de instalação | `npm install` |
-   | Comando de build | `npm run build` |
-   | Comando de start | `npm start` |
-   | Diretório de saída | `.next` |
+1. Na página do App, anote o **App ID** (número no topo).
+2. Em **Private keys → Generate a private key**, o GitHub baixa um arquivo `.pem`.
+3. Converta o `.pem` para base64 (uma linha só, mais fácil de colar no hPanel):
 
-4. Vincule o domínio **iadasilva.com.br** ao app.
+   ```powershell
+   # Windows (PowerShell)
+   [Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\caminho\rgm-squad-console.pem"))
+   ```
 
-## 4. Variáveis de ambiente
+   ```bash
+   # Linux / macOS
+   base64 -w0 rgm-squad-console.pem
+   ```
 
-No app Node.js do hPanel, cadastre as variáveis abaixo **antes do primeiro deploy**.
+Guarde o `.pem` em local seguro e não o envie por e-mail ou chat.
+
+### 3.3 Instalar na organização
+
+Na página do App → **Install App** → **RGMThech** → **All repositories** → **Install**.
+
+"All repositories" é necessário para que cada squad nova, criada pelo console, já fique acessível ao App.
+
+### 3.4 Ajustes nos repositórios
+
+- **Template:** em `RGMThech/agentic-data-squad` → Settings → marque **Template repository**.
+- **Actions na organização:** RGMThech → Settings → Actions → General → Workflow permissions:
+  - marque **Read and write permissions**
+  - marque **Allow GitHub Actions to create and approve pull requests**
+- **Squads que já existem:** em `.squad/squad.yaml`, preencha `console_bot: rgm-squad-console[bot]`, com o nome exato que aparece em Configuração → Saúde da instalação. Squads criadas pelo console já nascem com esse campo.
+- **Ruleset da `main`** (opcional, recomendado): adicione o App **RGM Squad Console** à **Bypass list**. Assim, alterações de equipe entram na hora; sem isso, o console abre um PR para cada alteração.
+
+## 4. Variáveis de ambiente (hPanel → app Node.js)
 
 | Variável | Valor |
 |----------|-------|
 | `APP_URL` | `https://iadasilva.com.br` |
-| `GITHUB_CLIENT_ID` | o Client ID do passo 2 |
-| `GITHUB_CLIENT_SECRET` | o Client secret do passo 2 |
-| `SESSION_SECRET` | um segredo aleatório de 32+ caracteres (veja abaixo) |
+| `SESSION_SECRET` | texto aleatório com 32+ caracteres (veja abaixo) |
+| `DATABASE_URL` | passo 1 |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` | passo 2 |
+| `ADMIN_EMAILS` | seu e-mail, por exemplo `voce@empresa.com.br` (vários separados por vírgula) |
+| `GITHUB_APP_ID` | passo 3.2 |
+| `GITHUB_APP_PRIVATE_KEY` | o base64 do `.pem` (passo 3.2) |
+| `GITHUB_ORG` | `RGMThech` |
 | `SQUAD_TEMPLATE_REPO` | `RGMThech/agentic-data-squad` |
 | `SQUAD_TOPIC` | `agentic-data-squad` |
-| `ALLOWED_GITHUB_USERS` | *(recomendado no início)* `mellrodrigo` |
-| `ALLOWED_GITHUB_ORGS` | *(recomendado)* `RGMThech`: membros da organização podem entrar. Para clientes, acrescente as organizações deles, separadas por vírgula |
 
-Para gerar o `SESSION_SECRET` no seu computador:
+Gerar o `SESSION_SECRET` no PowerShell:
 
-```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+```powershell
+[Convert]::ToBase64String((1..32 | % { Get-Random -Max 256 }))
 ```
 
-> `ALLOWED_GITHUB_USERS` e `ALLOWED_GITHUB_ORGS` vazios = qualquer conta do GitHub consegue entrar, mas só enxerga as squads às quais já tem acesso no GitHub. Comece restrito e abra quando o time entrar.
+**Remova as variáveis antigas**, que não são mais usadas:
+- `GITHUB_CLIENT_ID`
+- `GITHUB_CLIENT_SECRET`
+- `ALLOWED_GITHUB_USERS`
+- `ALLOWED_GITHUB_ORGS`
+- `GITHUB_URL`
 
-## 5. Deploy e verificação
+Trocar o `SESSION_SECRET` derruba todas as sessões e invalida os códigos pendentes. Isso é útil em caso de suspeita de vazamento.
 
-1. Rode o deploy no hPanel e acompanhe o log de build.
-2. Abra `https://iadasilva.com.br/api/health`. Deve responder `{"ok":true,...}`.
-3. Abra `https://iadasilva.com.br` → **Entrar com GitHub** → autorize.
-4. A squad `agentic-data-squad` (o próprio template) deve aparecer na lista.
+## 5. Deploy e primeiro acesso
 
-A partir daqui, **todo push na `main` do console gera um novo deploy automaticamente**.
+1. Rode o deploy no hPanel. O build é o de sempre: Node 22, `npm install`, `npm run build`, `npm start`.
+2. `https://iadasilva.com.br/api/health` deve responder `{"ok":true,...}`.
+3. Abra `https://iadasilva.com.br` → **Entrar** → informe o e-mail de `ADMIN_EMAILS` → digite o código recebido.
+4. Em **Minha conta** (clique nas suas iniciais), ajuste seu nome de exibição.
+5. Em **Usuários**, convide o time. Em cada squad, monte a equipe em **Configuração → Equipe e papéis**.
 
-## 6. Primeira squad de verdade
+## 6. Limpeza do login antigo pelo GitHub
 
-1. No console: **Nova squad**. Informe o dono, o nome, o cliente e a plataforma.
-2. Em **Configuração**: cadastre a chave da API da Anthropic. Ela vai criptografada direto para os segredos do GitHub Actions do repositório; o console não guarda a chave.
-3. Em **Equipe e papéis**: adicione os membros. Eles também precisam de acesso ao repositório no GitHub.
-4. No GitHub, em **Settings → Branches** do repositório da squad, proteja a `main`:
-   - exija Pull Request
-   - exija a checagem **Harness (naming, contratos, gates, testes)**
-5. **Nova feature** → descreva o problema → acompanhe o analista trabalhando.
+O console não usa mais login com GitHub. Para fechar essa porta:
+1. GitHub → **RGMThech → Settings → Developer settings → OAuth Apps** → apague o app **Squad Console**. Faça o mesmo em Settings → Developer settings da sua conta pessoal, se ele foi criado lá.
+2. Na sua conta: **Settings → Applications → Authorized OAuth Apps** → revogue o *Squad Console*.
 
 ---
+
+## Como o login funciona
+
+| Etapa | Proteção |
+|-------|----------|
+| Pedir código | Resposta idêntica para e-mails com e sem conta (não revela quem tem acesso). Limite de **3 pedidos por e-mail** e **10 por IP** a cada 15 minutos. |
+| Código | 6 dígitos, **válido por 10 minutos**, uso único, guardado só como HMAC-SHA256 (nunca em texto). |
+| Tentativas | **5 erros** invalidam o código. |
+| Sessão | Cookie criptografado, `httpOnly`, `Secure`, `SameSite=Lax`, **12 horas**. A conta é reconferida a cada página: desativar alguém ou "Encerrar sessões" derruba o acesso na hora. |
+| Contas | Só por convite. Administradores convidam; `ADMIN_EMAILS` são administradores permanentes. |
+| Auditoria | Logins, códigos errados, convites, mudanças de papel e de equipe ficam em **Auditoria**. |
 
 ## Problemas comuns
 
 | Sintoma | Causa provável | Solução |
 |---------|----------------|---------|
-| GitHub mostra *redirect_uri mismatch* | Callback do OAuth App diferente de `APP_URL` | Use exatamente `https://iadasilva.com.br/api/auth/callback` |
-| Página de erro citando `SESSION_SECRET` | Variável ausente ou curta | Cadastre um valor com 32+ caracteres e refaça o deploy |
-| Login funciona, mas a lista de squads vem vazia | Repositório sem o tópico, ou OAuth App não aprovado na organização | Adicione o tópico `agentic-data-squad` ao repositório, ou peça a aprovação ao owner da organização |
-| "Nova squad" diz que não é template | O template não está marcado | Veja o passo 1.1 |
-| Agente acionado, mas a execução falha logo no início | Chave da API ausente ou GitHub Actions desabilitado | Configure a chave no console e habilite o Actions no repositório |
-| A execução falha em "Validar pedido" | Quem acionou não está em `.squad/members.yaml` | Adicione a pessoa em Equipe e papéis |
-| Aprovar G3 dá erro de merge | Proteção de branch exige aprovações | O console já registra a aprovação do operador; confira as regras da branch |
-
-## Segurança
-
-- O token do GitHub fica apenas no cookie de sessão **criptografado** (httpOnly, 8 h) e nunca é enviado ao navegador.
-- Os escopos pedidos são `repo` (ler e escrever os repositórios da squad), `workflow` (acionar o squad-agent) e `read:org` (listar organizações).
-- Toda ação passa por duas checagens: o papel em `.squad/members.yaml` e a permissão real no GitHub.
-- Os gates são revalidados pelo CI (`check_spec.py` confere se quem aprovou é operador).
+| Erro citando `DATABASE_URL` ou MySQL | URL incorreta ou senha com caractere especial não codificado | Confira o passo 1 |
+| O código não chega | SMTP incorreto ou caiu no spam | Confira o passo 2 e o SPF/DKIM do domínio |
+| "O GitHub App não está instalado na organização" | App não instalado na RGMThech | Passo 3.3 |
+| "O GitHub App não conseguiu se autenticar" | `GITHUB_APP_ID` ou chave errados | Gere uma nova chave e cole o base64 de novo |
+| Agente recusado em "Validar pedido" | `console_bot` ausente no `.squad/squad.yaml`, ou a pessoa não está na equipe | Configuração → Saúde da instalação mostra o valor certo |
+| Equipe alterada mas a mudança não aparece | `main` protegida: o console abriu um PR | Aplique o PR, ou adicione o App ao bypass do ruleset (passo 3.4) |

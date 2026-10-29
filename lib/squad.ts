@@ -37,6 +37,7 @@ export type SquadConfig = {
   modelo: string;
   max_turnos: number;
   alerta_custo_usd: number;
+  console_bot: string;
 };
 
 export type SquadContext = {
@@ -48,7 +49,6 @@ export type SquadContext = {
   config: SquadConfig;
   members: Members;
   role: Role;
-  permission: string;
   user: User;
   o: GH;
 };
@@ -101,13 +101,9 @@ export type Run = {
 // ---------------- squads ----------------
 
 export async function listSquads(user: User): Promise<SquadSummary[]> {
-  const o = gh(user.token);
-  const repos = await o.paginate(o.repos.listForAuthenticatedUser, {
-    per_page: 100,
-    affiliation: "owner,collaborator,organization_member",
-    sort: "updated",
-  });
-  return repos
+  const o = await gh();
+  const repos = await o.paginate(o.apps.listReposAccessibleToInstallation, { per_page: 100 });
+  const squads = repos
     .filter((r) => (r.topics ?? []).map((t) => t.toLowerCase()).includes(env.topic))
     .map((r) => ({
       owner: r.owner.login,
@@ -116,7 +112,17 @@ export async function listSquads(user: User): Promise<SquadSummary[]> {
       description: r.description,
       updatedAt: r.updated_at ?? null,
       defaultBranch: r.default_branch,
-    }));
+    }))
+    .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
+  if (user.isAdmin) return squads;
+  // usuário comum: só as squads em que o e-mail dele aparece em .squad/members.yaml
+  const visiveis = await Promise.all(
+    squads.map(async (s) => {
+      const mem = await readFile(o, s.owner, s.repo, ".squad/members.yaml", s.defaultBranch).catch(() => null);
+      return resolveRole(user.email, parseMembers(mem?.content ?? null), false) ? s : null;
+    }),
+  );
+  return visiveis.filter((s): s is SquadSummary => s !== null);
 }
 
 const DEFAULT_CONFIG: SquadConfig = {
@@ -127,6 +133,7 @@ const DEFAULT_CONFIG: SquadConfig = {
   modelo: "sonnet",
   max_turnos: 60,
   alerta_custo_usd: 5,
+  console_bot: "",
 };
 
 export function parseConfig(text: string | null, fallbackName: string): SquadConfig {
@@ -145,12 +152,13 @@ export function parseConfig(text: string | null, fallbackName: string): SquadCon
     modelo: String(d.modelo ?? DEFAULT_CONFIG.modelo),
     max_turnos: Number(d.max_turnos ?? DEFAULT_CONFIG.max_turnos),
     alerta_custo_usd: Number(d.alerta_custo_usd ?? DEFAULT_CONFIG.alerta_custo_usd),
+    console_bot: String(d.console_bot ?? ""),
   };
 }
 
 /** Carrega a squad e resolve o papel do usuário. Retorna null se não houver acesso. */
 export async function loadSquad(user: User, owner: string, repo: string): Promise<SquadContext | null> {
-  const o = gh(user.token);
+  const o = await gh();
   let repoData;
   try {
     repoData = (await o.repos.get({ owner, repo })).data;
@@ -159,15 +167,13 @@ export async function loadSquad(user: User, owner: string, repo: string): Promis
     throw e;
   }
   const branch = repoData.default_branch;
-  const [cfg, mem, perm] = await Promise.all([
+  const [cfg, mem] = await Promise.all([
     readFile(o, owner, repo, ".squad/squad.yaml", branch),
     readFile(o, owner, repo, ".squad/members.yaml", branch),
-    o.repos
-      .getCollaboratorPermissionLevel({ owner, repo, username: user.login })
-      .then((r) => r.data.permission)
-      .catch(() => (repoData.permissions?.admin ? "admin" : repoData.permissions?.push ? "write" : "read")),
   ]);
   const members = parseMembers(mem?.content ?? null);
+  const role = resolveRole(user.email, members, user.isAdmin);
+  if (!role) return null;
   return {
     owner,
     repo,
@@ -176,8 +182,7 @@ export async function loadSquad(user: User, owner: string, repo: string): Promis
     htmlUrl: repoData.html_url,
     config: parseConfig(cfg?.content ?? null, repo),
     members,
-    role: resolveRole(user.login, members, perm),
-    permission: perm,
+    role,
     user,
     o,
   };
