@@ -32,5 +32,8 @@
   "private": true,
   "engines": {
     "node": ">=20"
+  },
+  "overrides": {
+    "postcss": "^8.5.32"
   }
 }
