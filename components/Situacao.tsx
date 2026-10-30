@@ -20,6 +20,8 @@ function alvo(s: Situacao): { href: string; texto: string } | null {
     case "g2":
     case "g3":
       return { href: "#decisao", texto: `Ir para a aprovação do ${s.acao.toUpperCase()}` };
+    case "ver_entrega":
+      return { href: "?aba=entrega", texto: "Ver a entrega e baixar" };
     case "acionar":
       return { href: "#acionar", texto: s.agente ? `Acionar ${s.agente}` : "Acionar agente" };
     default:
@@ -29,7 +31,7 @@ function alvo(s: Situacao): { href: string; texto: string } | null {
 
 /** Quadro no topo da feature: diz em uma frase se a squad está trabalhando ou esperando, e o que fazer. */
 export function SituacaoCard({ s, rodando, ultima, podeAgir }: { s: Situacao; rodando: Run | null; ultima: Run | null; podeAgir: boolean }) {
-  const a = podeAgir ? alvo(s) : null;
+  const a = podeAgir || s.acao === "ver_entrega" ? alvo(s) : null;
   const icone =
     s.tipo === "rodando" ? <span className="dot pulse" /> : s.tipo === "entregue" ? <IconCheck size={18} /> : s.tipo === "erro" ? <IconX size={18} /> : <IconGate size={18} />;
   return (

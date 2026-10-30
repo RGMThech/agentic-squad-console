@@ -109,13 +109,136 @@ export async function createFeature(_: ActionState, fd: FormData): Promise<Actio
       .filter(([, v]) => v)
       .map(([k, v]) => `**${k}:** ${v}`)
       .join("\n");
-    const instrucao = `Crie a spec da feature ${feature} (specs/${feature}/spec.md, id ${feature.slice(0, 3)}) a partir deste pedido de ${quem(ctx)}. Liste todas as dúvidas em "Dúvidas abertas" e deixe status: em_revisao.\n\n${pedido}`;
+    // o pedido original fica registrado na branch da feature: dá para relê-lo a qualquer momento
+    await gravarPedido(ctx, feature, titulo, campos);
+    const instrucao = `Crie a spec da feature ${feature} (specs/${feature}/spec.md, id ${feature.slice(0, 3)}) a partir deste pedido de ${quem(ctx)}, registrado em specs/${feature}/pedido.md (não altere esse arquivo). Liste todas as dúvidas em "Dúvidas abertas" e deixe status: em_revisao.\n\n${pedido}`;
     await dispatch(ctx, "analista-requisitos", feature, instrucao);
     destino = `${base(ctx)}/f/${feature}?novo=1`;
   } catch (e) {
     return { error: errMsg(e) };
   }
   redirect(destino);
+}
+
+async function gravarPedido(ctx: SquadContext, feature: string, titulo: string, campos: [string, string][]) {
+  const branch = `squad/${feature}`;
+  try {
+    const head = await ctx.o.git.getRef({ owner: ctx.owner, repo: ctx.repo, ref: `heads/${ctx.defaultBranch}` });
+    await ctx.o.git.createRef({ owner: ctx.owner, repo: ctx.repo, ref: `refs/heads/${branch}`, sha: head.data.object.sha }).catch((e) => {
+      if (status(e) !== 422) throw e; // já existe
+    });
+    const corpo = [
+      "---",
+      `id: "${feature.slice(0, 3)}"`,
+      `titulo: ${JSON.stringify(titulo)}`,
+      `solicitante: ${ctx.user.email}`,
+      `criado_em: ${todaySaoPaulo()}`,
+      "---",
+      "",
+      `# Pedido original — ${titulo}`,
+      "",
+      "> Registro do que foi pedido ao abrir a feature no Squad Console. Não é alterado pelos agentes;",
+      "> mudanças de escopo ficam na spec (seção Decisões e Histórico de alterações).",
+      "",
+      ...campos.filter(([, v]) => v).flatMap(([k, v]) => [`## ${k}`, "", v, ""]),
+    ].join("\n");
+    await writeFile(ctx.o, { owner: ctx.owner, repo: ctx.repo, path: `specs/${feature}/pedido.md`, branch, content: corpo, message: `pedido(${feature}): registro do pedido original (${ctx.user.email})` });
+  } catch (e) {
+    // sem o registro a feature ainda funciona: o pedido segue na instrução do analista
+    console.error("[nova feature] não consegui gravar pedido.md:", errDetail(e));
+  }
+}
+
+// ---------------------------------------------------------------- ajustar a spec
+
+function proximaVersao(v: string | undefined): string {
+  const n = Number.parseFloat(v ?? "");
+  return Number.isFinite(n) ? (Math.round((n + 0.1) * 10) / 10).toFixed(1) : "1.1";
+}
+
+/** Reabre o G2 quando a spec muda depois do design aprovado. */
+async function reabrirDesign(ctx: SquadContext, f: Awaited<ReturnType<typeof loadFeature>>, feature: string, motivo: string) {
+  if (!f.design || f.design.data.status !== "aprovado" || !f.branch) return false;
+  await writeFile(ctx.o, {
+    owner: ctx.owner, repo: ctx.repo, path: f.design.path, branch: f.branch, sha: f.design.sha,
+    content: setFrontmatter(f.design.raw, { status: "em_revisao", aprovado_por: "''", aprovado_em: "''" }),
+    message: `gate(G2): design de ${feature} reaberto — ${motivo}`,
+  });
+  return true;
+}
+
+async function featureEditavel(ctx: SquadContext, feature: string) {
+  if (!RE_FEATURE.test(feature)) throw new Error("Feature inválida.");
+  const prs = await listSquadPRs(ctx);
+  const f = await loadFeature(ctx, feature, true, prs);
+  if (!f.branch) throw new Error("A feature não tem branch ativa.");
+  if (f.pr?.state === "merged") throw new Error("Esta feature já foi entregue (G3). Para mudar o que foi entregue, abra uma nova feature de evolução.");
+  const runs = await listRuns(ctx, prs, 30);
+  const rodando = runs.find((r) => r.feature === feature && isRunning(r));
+  if (rodando) throw new Error(`O ${rodando.agente} está trabalhando nesta feature. Espere terminar para ajustar a spec.`);
+  return f;
+}
+
+/** O Operador edita a spec diretamente. Se ela estava aprovada, o G1 (e o G2) reabrem. */
+export async function editSpec(_: ActionState, fd: FormData): Promise<ActionState> {
+  let destino = "";
+  try {
+    const ctx = await ctxFrom(fd, "aprovar");
+    const feature = str(fd, "feature", 80);
+    const motivo = str(fd, "motivo", 500);
+    const conteudo = String(fd.get("conteudo") ?? "").replace(/\r\n/g, "\n");
+    if (motivo.length < 5) return { error: "Explique em poucas palavras o que mudou e por quê." };
+    if (conteudo.length < 50 || conteudo.length > 200_000) return { error: "O conteúdo da spec está vazio ou grande demais." };
+    if (!/^---\n[\s\S]*?\n---/.test(conteudo)) return { error: "Mantenha o bloco de front matter (--- no início) da spec." };
+    const f = await featureEditavel(ctx, feature);
+    if (!f.spec) return { error: "Ainda não existe spec.md para editar." };
+    if (conteudo.trim() === f.spec.raw.trim()) return { error: "Nada mudou na spec." };
+
+    const versao = proximaVersao(f.spec.data.versao);
+    const estavaAprovada = f.spec.data.status === "aprovado";
+    let novo = setFrontmatter(conteudo, { versao, status: "em_revisao", ...(estavaAprovada ? { aprovado_por: "''", aprovado_em: "''" } : {}) });
+    const linha = `- ${todaySaoPaulo()} · v${versao} · ${ctx.user.email}: ${motivo.replace(/\n+/g, " ")}`;
+    novo = /^## Histórico de alterações\s*$/m.test(novo)
+      ? novo.replace(/^## Histórico de alterações\s*$/m, (h) => `${h}\n${linha}`)
+      : `${novo.replace(/\s*$/, "")}\n\n## Histórico de alterações\n${linha}\n`;
+    await writeFile(ctx.o, {
+      owner: ctx.owner, repo: ctx.repo, path: f.spec.path, branch: f.branch!, sha: f.spec.sha, content: novo,
+      message: `spec(${feature}): v${versao} editada pelo Operador (${ctx.user.email}) — ${motivo.slice(0, 80)}`,
+    });
+    const design = await reabrirDesign(ctx, f, feature, `spec alterada para v${versao}`);
+    await comment(ctx, f.pr?.number, `✏️ **Spec alterada pelo Operador** (${quem(ctx)}) — v${versao}\n\n> ${motivo}\n\n${estavaAprovada ? "O G1 foi reaberto" : "A spec segue em revisão"}${design ? " e o G2 também (o design precisa refletir a mudança)" : ""}.`);
+    if (fd.get("conferir") === "on")
+      await dispatch(ctx, "analista-requisitos", feature, `O Operador ${quem(ctx)} editou a spec de ${feature} diretamente (agora v${versao}). Motivo: ${motivo}\n\nConfira a consistência da spec inteira com a alteração (regras, métricas, critérios de aceite), registre a decisão em "Decisões" e liste em "Dúvidas abertas" só o que precisar de confirmação, incluindo impactos no design e em tarefas já implementadas. Não desfaça a alteração do Operador. Mantenha versao ${versao} e status: em_revisao.`);
+    await (await store()).audit({ actor: ctx.user.email, action: "spec.editar", target: `${ctx.owner}/${ctx.repo} ${feature} v${versao}` });
+    destino = `${base(ctx)}/f/${feature}`;
+  } catch (e) {
+    return { error: errMsg(e) };
+  }
+  redirect(destino);
+}
+
+/** Pede ao analista uma mudança na spec, a qualquer momento antes do G3. */
+export async function askSpecChange(_: ActionState, fd: FormData): Promise<ActionState> {
+  try {
+    const ctx = await ctxFrom(fd, "aprovar");
+    const feature = str(fd, "feature", 80);
+    const pedido = str(fd, "pedido", 5000);
+    if (pedido.length < 10) return { error: "Descreva o que precisa mudar na especificação." };
+    const f = await featureEditavel(ctx, feature);
+    const aprovada = f.spec?.data.status === "aprovado";
+    const design = await reabrirDesign(ctx, f, feature, "mudança de escopo pedida pelo Operador");
+    await comment(ctx, f.pr?.number, `✏️ **Mudança na spec pedida** por ${quem(ctx)}:\n\n${pedido}`);
+    await dispatch(
+      ctx,
+      "analista-requisitos",
+      feature,
+      `O Operador ${quem(ctx)} pediu uma mudança na especificação de ${feature}${aprovada ? " (que estava aprovada no G1: a mudança reabre o G1)" : ""}. Atualize spec.md, incremente versao, registre em "Decisões" e em "Histórico de alterações", deixe status: em_revisao e liste em "Dúvidas abertas" o que precisar de confirmação (incluindo impactos no design e em tarefas já feitas).\n\nMudança pedida:\n${pedido}`,
+    );
+    revalidatePath(`${base(ctx)}/f/${feature}`);
+    return { ok: true, message: `Pedido enviado ao analista.${aprovada ? " O G1 volta para sua aprovação quando ele terminar" : ""}${design ? "; o G2 também foi reaberto" : ""}.` };
+  } catch (e) {
+    return { error: errMsg(e) };
+  }
 }
 
 // ---------------------------------------------------------------- acionar agente
@@ -176,7 +299,9 @@ export async function approveGate(_: ActionState, fd: FormData): Promise<ActionS
     if (auto) {
       const [agente, instrucao] =
         gate === "G1"
-          ? ["arquiteto-dados", `A spec de ${feature} foi aprovada no G1 por ${quem(ctx)}. Produza specs/${feature}/design.md, os contratos e ADRs necessários e deixe status: em_revisao.`]
+          ? f.design
+            ? ["arquiteto-dados", `A spec de ${feature} mudou e foi reaprovada no G1 (v${f.spec?.data.versao ?? "?"}) por ${quem(ctx)}. Revise specs/${feature}/design.md, os contratos e ADRs para refletir a spec atual (veja "Histórico de alterações" e "Decisões"), registre o que mudou e deixe status: em_revisao.`]
+            : ["arquiteto-dados", `A spec de ${feature} foi aprovada no G1 por ${quem(ctx)}. Produza specs/${feature}/design.md, os contratos e ADRs necessários e deixe status: em_revisao.`]
           : ["orquestrador", `Spec e design de ${feature} aprovados (G2 por ${quem(ctx)}). Gere tasks.md e conduza implementação, QA, revisão e documentação até o G3 ficar pronto.`];
       await dispatch(ctx, agente, feature, instrucao);
       extra = ` ${agente} acionado.`;

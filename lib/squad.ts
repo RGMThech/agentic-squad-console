@@ -87,6 +87,9 @@ export type Feature = {
   tasks: Task[];
   qa: Doc | null;
   review: Doc | null;
+  /** Pedido original (specs/<id>/pedido.md) e manifesto de entrega; carregados só na página da feature. */
+  pedido?: Doc | null;
+  entrega?: Doc | null;
   doubts: string[];
   pr: PR | null;
   gates: { g1: GateState; g2: GateState; g3: GateState };
@@ -249,14 +252,16 @@ export async function listFeatureIds(ctx: SquadContext): Promise<{ id: string; b
   return [...ids.entries()].map(([id, branch]) => ({ id, branch })).sort((a, b) => b.id.localeCompare(a.id));
 }
 
-export async function loadFeature(ctx: SquadContext, id: string, hasBranch: boolean, prs: PR[]): Promise<Feature> {
+export async function loadFeature(ctx: SquadContext, id: string, hasBranch: boolean, prs: PR[], extras = false): Promise<Feature> {
   const branch = hasBranch ? `squad/${id}` : null;
   const ref = branch ?? ctx.defaultBranch;
   const base = `specs/${id}`;
   const [spec, design, tasksDoc, qa, review] = await Promise.all(
     ["spec.md", "design.md", "tasks.md", "qa-report.md", "review.md"].map((f) => readDoc(ctx, `${base}/${f}`, ref)),
   );
-  const pr = (branch && prs.filter((p) => p.headRef === branch).sort((a, b) => b.number - a.number)[0]) || null;
+  // o PR é achado mesmo depois do merge, quando a branch já foi apagada
+  const pr = prs.filter((p) => p.headRef === `squad/${id}`).sort((a, b) => b.number - a.number)[0] || null;
+  const [pedido, entrega] = extras ? await Promise.all([readDoc(ctx, `${base}/pedido.md`, ref), readDoc(ctx, `${base}/entrega.md`, ref)]) : [undefined, undefined];
   const gates = computeGates({
     specStatus: spec?.data.status,
     designStatus: design?.data.status,
@@ -277,6 +282,8 @@ export async function loadFeature(ctx: SquadContext, id: string, hasBranch: bool
     tasks: tasksDoc ? parseTasks(tasksDoc.body) : [],
     qa,
     review,
+    pedido,
+    entrega,
     doubts: spec ? openDoubts(spec.body) : [],
     pr,
     gates,

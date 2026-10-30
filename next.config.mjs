@@ -2,7 +2,7 @@
 const nextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
-  serverExternalPackages: ["libsodium-wrappers", "mysql2", "nodemailer", "tedious"],
+  serverExternalPackages: ["libsodium-wrappers", "mysql2", "nodemailer", "tedious", "pdfmake", "docx", "jszip"],
   async headers() {
     return [
       {

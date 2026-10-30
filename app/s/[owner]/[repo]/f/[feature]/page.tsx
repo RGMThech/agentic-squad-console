@@ -8,7 +8,8 @@ import { PageHead } from "@/components/Shell";
 import { DocBadge, GateTrack, RunIcon } from "@/components/Status";
 import { DoubtsPanel } from "@/components/DoubtsPanel";
 import { SituacaoCard } from "@/components/Situacao";
-import { approveG3, approveGate, requestChanges, runAgent } from "@/lib/actions";
+import { EntregaView } from "@/components/Entrega";
+import { approveG3, approveGate, askSpecChange, requestChanges, runAgent } from "@/lib/actions";
 import { AGENTES_PADRAO, RE_FEATURE, can, nextStep, parseDoubts } from "@/lib/core";
 import { ago, money, runDuration, when } from "@/lib/format";
 import { listDir } from "@/lib/github";
@@ -16,11 +17,13 @@ import { getPRs, getSquad } from "@/lib/page";
 import { isRunning, listFeatureIds, listRuns, loadFeature, prChecks, situacaoDaFeature, ultimaExecucao, type Doc, type Run } from "@/lib/squad";
 
 const ABAS = [
+  { k: "pedido", t: "Pedido" },
   { k: "spec", t: "Spec" },
   { k: "design", t: "Design" },
   { k: "tarefas", t: "Tarefas" },
   { k: "qa", t: "QA" },
   { k: "revisao", t: "Revisão" },
+  { k: "entrega", t: "Entrega" },
   { k: "execucoes", t: "Execuções" },
 ] as const;
 
@@ -32,7 +35,7 @@ export async function generateMetadata({ params }: { params: Params }) {
 
 export default async function FeaturePage({ params, searchParams }: { params: Params; searchParams: Promise<{ aba?: string; novo?: string }> }) {
   const { owner, repo, feature } = await params;
-  const { aba = "spec", novo } = await searchParams;
+  const { aba: abaPedida, novo } = await searchParams;
   if (!RE_FEATURE.test(feature)) notFound();
   const ctx = await getSquad(owner, repo);
   const prs = await getPRs(owner, repo);
@@ -74,7 +77,8 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
     );
   }
 
-  const f = await loadFeature(ctx, feature, entry.branch, prs);
+  const f = await loadFeature(ctx, feature, entry.branch, prs, true);
+  const aba = abaPedida ?? (f.gates.g3 === "aprovado" ? "entrega" : "spec");
   const checks = f.pr && f.pr.state === "open" ? await prChecks(ctx, f.pr.headSha) : null;
   const sit = situacaoDaFeature(f, runs);
   const ultima = ultimaExecucao(f, runs);
@@ -142,7 +146,29 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
                   </Link>
                 ))}
               </nav>
-              {aba === "spec" && <DocView doc={f.spec} vazio="A spec ainda não foi criada." />}
+              {aba === "pedido" &&
+                (f.pedido ? (
+                  <DocView doc={f.pedido} vazio="" />
+                ) : (
+                  <div className="card-pad stack-sm">
+                    <p className="muted">
+                      Esta feature foi aberta antes de o console registrar o pedido original. O que foi pedido está na seção 1 da spec (Contexto e problema).
+                    </p>
+                    <Link href={`${fb}?aba=spec`} className="small">Abrir a spec →</Link>
+                  </div>
+                ))}
+              {aba === "spec" && (
+                <>
+                  {operador && f.spec && f.gates.g3 !== "aprovado" && (
+                    <div className="card-pad doc-acoes">
+                      <span className="small muted">Precisa mudar algo na definição?</span>
+                      <Link href={`${fb}/spec`} className="btn btn-sm">Editar a spec</Link>
+                      <a href="#ajustar" className="btn btn-sm">Pedir ao analista</a>
+                    </div>
+                  )}
+                  <DocView doc={f.spec} vazio="A spec ainda não foi criada." />
+                </>
+              )}
               {aba === "design" && <DocView doc={f.design} vazio="O design é criado pelo arquiteto depois do G1." />}
               {aba === "tarefas" &&
                 (f.tasks.length ? (
@@ -177,6 +203,7 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
                 ))}
               {aba === "qa" && <DocView doc={f.qa} vazio="Ainda não há relatório de QA." />}
               {aba === "revisao" && <DocView doc={f.review} vazio="Ainda não há parecer do revisor." />}
+              {aba === "entrega" && <EntregaView ctx={ctx} f={f} base={`${fb}/baixar`} />}
               {aba === "execucoes" && (
                 <div className="card-pad">
                   <RunsList runs={runs} />
@@ -264,6 +291,27 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
 
             {f.gates.g3 === "aprovado" && (
               <div className="alert alert-ok">Feature entregue: o PR foi mesclado na branch principal.</div>
+            )}
+
+            {/* ---------------- ajustar a especificação ---------------- */}
+            {operador && f.spec && f.gates.g3 !== "aprovado" && (
+              <div className="card card-pad stack-sm" id="ajustar">
+                <h3>Ajustar a especificação</h3>
+                <p className="small muted">
+                  Mude a definição a qualquer momento antes do G3.{" "}
+                  {f.gates.g1 === "aprovado" ? "A spec está aprovada: a mudança reabre o G1 (e o G2, se o design já foi aprovado)." : ""}
+                </p>
+                <Link href={`${fb}/spec`} className="btn btn-block">
+                  Editar a spec eu mesmo
+                </Link>
+                <details>
+                  <summary className="small" style={{ cursor: "pointer" }}>Pedir a mudança ao analista</summary>
+                  <ActionForm action={askSpecChange} submit="Enviar ao analista" variant="default" resetOnOk>
+                    {hidden}
+                    <textarea name="pedido" className="textarea" required placeholder="Ex.: incluir os votos nulos e brancos no relatório por município; o corte passa a ser o 2º turno." />
+                  </ActionForm>
+                </details>
+              </div>
             )}
 
             {/* ---------------- acionar agente ---------------- */}

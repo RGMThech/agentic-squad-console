@@ -403,7 +403,7 @@ Você é o agente **${name}**. Leia \`AGENTS.md\` antes de tudo.
 // ---------- situação da feature: em execução, precisa de você, falhou ou entregue ----------
 
 export type SituacaoTipo = "rodando" | "voce" | "erro" | "entregue";
-export type SituacaoAcao = "responder" | "enviar_respostas" | "g1" | "g2" | "g3" | "acionar" | "aguardar";
+export type SituacaoAcao = "responder" | "enviar_respostas" | "g1" | "g2" | "g3" | "acionar" | "aguardar" | "ver_entrega";
 
 export type Situacao = {
   tipo: SituacaoTipo;
@@ -429,7 +429,8 @@ const RE_BLOQUEIO = /decis[aã]o necess[aá]ria|bloquead|para destravar|preciso 
 /** Uma frase para cada estado: ninguém fica sem saber se a squad está trabalhando ou esperando. */
 export function situacao(i: SituacaoInput): Situacao {
   const g = i.gates;
-  if (g.g3 === "aprovado") return { tipo: "entregue", titulo: "Entregue", detalhe: "O PR foi mesclado na branch principal.", acao: "aguardar" };
+  if (g.g3 === "aprovado")
+    return { tipo: "entregue", titulo: "Entregue", detalhe: "O PR foi mesclado na branch principal. Veja tudo o que foi construído e baixe os documentos na aba Entrega.", acao: "ver_entrega" };
   if (i.rodando) {
     return {
       tipo: "rodando",
