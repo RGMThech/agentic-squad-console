@@ -38,6 +38,7 @@ export type SquadConfig = {
   max_turnos: number;
   alerta_custo_usd: number;
   console_bot: string;
+  databricks: { host: string; warehouseId: string; leitura: string[]; escrita: string } | null;
 };
 
 export type SquadContext = {
@@ -134,6 +135,7 @@ const DEFAULT_CONFIG: SquadConfig = {
   max_turnos: 60,
   alerta_custo_usd: 5,
   console_bot: "",
+  databricks: null,
 };
 
 export function parseConfig(text: string | null, fallbackName: string): SquadConfig {
@@ -153,6 +155,15 @@ export function parseConfig(text: string | null, fallbackName: string): SquadCon
     max_turnos: Number(d.max_turnos ?? DEFAULT_CONFIG.max_turnos),
     alerta_custo_usd: Number(d.alerta_custo_usd ?? DEFAULT_CONFIG.alerta_custo_usd),
     console_bot: String(d.console_bot ?? ""),
+    databricks: (() => {
+      const x = (d.databricks ?? null) as Record<string, unknown> | null;
+      if (!x || typeof x !== "object") return null;
+      const host = String(x.host ?? "").trim();
+      const warehouseId = String(x.warehouse_id ?? "").trim();
+      if (!host && !warehouseId) return null;
+      const leitura = Array.isArray(x.leitura) ? x.leitura.map(String) : String(x.leitura ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+      return { host, warehouseId, leitura, escrita: String(x.escrita ?? "").trim() };
+    })(),
   };
 }
 
@@ -334,6 +345,16 @@ export async function prChecks(ctx: SquadContext, sha: string) {
     state: (runs.length === 0 ? "none" : failed ? "failure" : pending ? "pending" : "success") as "none" | "failure" | "pending" | "success",
     items: runs.map((c) => ({ name: c.name, status: c.status, conclusion: c.conclusion, url: c.html_url })),
   };
+}
+
+export async function secretStatus(ctx: SquadContext, name: string): Promise<{ set: boolean; updatedAt: string | null }> {
+  try {
+    const r = await ctx.o.actions.getRepoSecret({ owner: ctx.owner, repo: ctx.repo, secret_name: name });
+    return { set: true, updatedAt: r.data.updated_at };
+  } catch (e) {
+    if (status(e) === 404 || status(e) === 403) return { set: false, updatedAt: null };
+    throw e;
+  }
 }
 
 export async function apiKeyStatus(ctx: SquadContext): Promise<{ set: boolean; updatedAt: string | null }> {

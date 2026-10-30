@@ -9,7 +9,8 @@ import { can, parseFrontmatter } from "@/lib/core";
 import { ago, when } from "@/lib/format";
 import { appBotLogin, listDir, readFile, status, type GH } from "@/lib/github";
 import { getSquad, type SquadParams } from "@/lib/page";
-import { apiKeyStatus, listSquadPRs } from "@/lib/squad";
+import { apiKeyStatus, listSquadPRs, secretStatus } from "@/lib/squad";
+import { DatabricksCard } from "@/components/DatabricksCard";
 
 export const metadata = { title: "Configuração" };
 
@@ -21,7 +22,7 @@ export default async function ConfigPage({ params, searchParams }: { params: Squ
   const operador = can(ctx.role, "configurar");
   const edit = (p: string) => `${b}/config/edit?path=${encodeURIComponent(p)}`;
 
-  const [agentFiles, skillDirs, key, configPRs, workflow, protecao, usuarios, bot] = await Promise.all([
+  const [agentFiles, skillDirs, key, configPRs, workflow, protecao, usuarios, bot, dbxSegredo] = await Promise.all([
     listDir(ctx.o, owner, repo, ".claude/agents", ctx.defaultBranch),
     listDir(ctx.o, owner, repo, ".claude/skills", ctx.defaultBranch),
     operador ? apiKeyStatus(ctx) : Promise.resolve(null),
@@ -30,6 +31,7 @@ export default async function ConfigPage({ params, searchParams }: { params: Squ
     protecaoDaBranch(ctx.o, owner, repo, ctx.defaultBranch),
     store().then((s) => s.listUsers()),
     appBotLogin(),
+    secretStatus(ctx, "DATABRICKS_CLIENT_SECRET").catch(() => ({ set: false, updatedAt: null })),
   ]);
   const contas = new Map(usuarios.map((u) => [u.email, u]));
 
@@ -116,6 +118,8 @@ export default async function ConfigPage({ params, searchParams }: { params: Squ
             ))}
           </div>
         </div>
+
+        <DatabricksCard owner={owner} repo={repo} atual={ctx.config.databricks} segredo={dbxSegredo} podeEditar={operador} />
 
         <section className="card">
           <div className="card-head">

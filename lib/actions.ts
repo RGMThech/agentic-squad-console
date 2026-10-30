@@ -9,7 +9,8 @@ import { store } from "./db";
 import { sendInvite } from "./mail";
 import { isValidEmail, normalizeEmail } from "./otp";
 import { requireUser } from "./session";
-import { isRunning, listFeatureIds, listRuns, listSquadPRs, loadFeature, loadSquad, prChecks, type SquadContext } from "./squad";
+import { isRunning, listFeatureIds, listRuns, listSquadPRs, loadFeature, loadSquad, prChecks, secretStatus, type SquadContext } from "./squad";
+import { normalizeHost, parseLeitura, setDatabricksYaml, testConnection, validateDbxConfig, type Check, type DbxConfig } from "./databricks";
 import {
   RE_AGENT,
   applyAnswers,
@@ -345,23 +346,92 @@ export async function mergeConfigPR(_: ActionState, fd: FormData): Promise<Actio
   }
 }
 
+async function putRepoSecret(ctx: SquadContext, name: string, value: string) {
+  const pk = (await ctx.o.actions.getRepoPublicKey({ owner: ctx.owner, repo: ctx.repo })).data;
+  await sodium.ready;
+  const sealed = sodium.crypto_box_seal(sodium.from_string(value), sodium.from_base64(pk.key, sodium.base64_variants.ORIGINAL));
+  await ctx.o.actions.createOrUpdateRepoSecret({
+    owner: ctx.owner,
+    repo: ctx.repo,
+    secret_name: name,
+    encrypted_value: sodium.to_base64(sealed, sodium.base64_variants.ORIGINAL),
+    key_id: pk.key_id,
+  });
+}
+
 export async function setApiKey(_: ActionState, fd: FormData): Promise<ActionState> {
   try {
     const ctx = await ctxFrom(fd, "configurar");
     const key = String(fd.get("apiKey") ?? "").trim();
     if (!/^sk-ant-[A-Za-z0-9_-]{20,}$/.test(key)) return { error: "Isso não parece uma chave da API da Anthropic (começa com sk-ant-)." };
-    const pk = (await ctx.o.actions.getRepoPublicKey({ owner: ctx.owner, repo: ctx.repo })).data;
-    await sodium.ready;
-    const sealed = sodium.crypto_box_seal(sodium.from_string(key), sodium.from_base64(pk.key, sodium.base64_variants.ORIGINAL));
-    await ctx.o.actions.createOrUpdateRepoSecret({
-      owner: ctx.owner,
-      repo: ctx.repo,
-      secret_name: "ANTHROPIC_API_KEY",
-      encrypted_value: sodium.to_base64(sealed, sodium.base64_variants.ORIGINAL),
-      key_id: pk.key_id,
-    });
+    await putRepoSecret(ctx, "ANTHROPIC_API_KEY", key);
     revalidatePath(`${base(ctx)}/config`);
     return { ok: true, message: "Chave salva como segredo ANTHROPIC_API_KEY do repositório. O console não guarda a chave." };
+  } catch (e) {
+    return { error: errMsg(e) };
+  }
+}
+
+// ---------------------------------------------------------------- Databricks
+
+export type DbxState = ActionState & { checks?: Check[]; salvo?: boolean };
+
+/** Testa a conexão com as credenciais informadas e, se passar, grava segredos e configuração. */
+export async function saveDatabricks(_: DbxState, fd: FormData): Promise<DbxState> {
+  try {
+    const ctx = await ctxFrom(fd, "configurar");
+    const somenteTestar = fd.get("intent") === "testar";
+    const cfg: DbxConfig = {
+      host: normalizeHost(str(fd, "host", 300)),
+      warehouseId: str(fd, "warehouse", 80),
+      leitura: parseLeitura(str(fd, "leitura", 2000)),
+      escrita: str(fd, "escrita", 200).replace(/`/g, "").toLowerCase(),
+    };
+    const invalido = validateDbxConfig(cfg);
+    if (invalido) return { error: invalido };
+    const clientId = str(fd, "clientId", 200);
+    const secret = String(fd.get("secret") ?? "").trim();
+    const jaTemSegredo = (await secretStatus(ctx, "DATABRICKS_CLIENT_SECRET")).set;
+
+    let checks: Check[] | undefined;
+    if (clientId && secret) {
+      checks = await testConnection(cfg, clientId, secret);
+      if (somenteTestar || checks.some((c) => !c.ok)) {
+        return checks.some((c) => !c.ok)
+          ? { error: "A conexão não passou em todas as checagens. Nada foi salvo.", checks }
+          : { ok: true, message: "Conexão OK. Clique em Salvar para gravar.", checks };
+      }
+    } else if (somenteTestar || !jaTemSegredo) {
+      return { error: "Informe o Client ID e o Client secret para testar e salvar." };
+    } else if (clientId || secret) {
+      return { error: "Para trocar as credenciais, informe Client ID e Client secret juntos." };
+    }
+
+    if (clientId && secret) {
+      await putRepoSecret(ctx, "DATABRICKS_CLIENT_ID", clientId);
+      await putRepoSecret(ctx, "DATABRICKS_CLIENT_SECRET", secret);
+    }
+    const atual = await readFile(ctx.o, ctx.owner, ctx.repo, ".squad/squad.yaml", ctx.defaultBranch);
+    const YAML = await import("yaml");
+    const novo = setDatabricksYaml(atual?.content ?? "", cfg, YAML);
+    let pr: string | undefined;
+    if (novo !== (atual?.content ?? "")) {
+      const r = await commitDiretoOuPR(ctx, ".squad/squad.yaml", novo, "acesso ao Databricks");
+      if (!r.direto) pr = r.url;
+    }
+    await (await store()).audit({ actor: ctx.user.email, action: "squad.databricks", target: `${ctx.owner}/${ctx.repo}: ${cfg.host}` });
+    revalidatePath(`${base(ctx)}/config`);
+    return {
+      ok: true,
+      salvo: true,
+      checks,
+      url: pr,
+      message: pr
+        ? "Credenciais salvas nos segredos do GitHub. A branch principal é protegida: abri um PR com a configuração (host, warehouse, catálogos)."
+        : clientId
+          ? "Conexão testada e salva. Os agentes já podem consultar o Databricks."
+          : "Configuração atualizada (credenciais mantidas).",
+    };
   } catch (e) {
     return { error: errMsg(e) };
   }
