@@ -6,8 +6,9 @@ import { IconExternal } from "@/components/Icons";
 import { Markdown } from "@/components/Markdown";
 import { PageHead } from "@/components/Shell";
 import { DocBadge, GateTrack, RunIcon } from "@/components/Status";
+import { DoubtsPanel } from "@/components/DoubtsPanel";
 import { approveG3, approveGate, requestChanges, runAgent } from "@/lib/actions";
-import { AGENTES_PADRAO, RE_FEATURE, can, nextStep } from "@/lib/core";
+import { AGENTES_PADRAO, RE_FEATURE, can, nextStep, parseDoubts } from "@/lib/core";
 import { ago, money, runDuration, when } from "@/lib/format";
 import { listDir } from "@/lib/github";
 import { getPRs, getSquad } from "@/lib/page";
@@ -76,6 +77,7 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
   const checks = f.pr && f.pr.state === "open" ? await prChecks(ctx, f.pr.headSha) : null;
   const sugestao = nextStep(f.gates, feature);
   const operador = can(ctx.role, "aprovar");
+  const duvidas = f.spec ? parseDoubts(f.spec.body) : { abertas: [], resolvidas: [] };
   const hidden = (
     <>
       <input type="hidden" name="owner" value={owner} />
@@ -109,6 +111,19 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
             <div className="card card-pad">
               <GateTrack gates={f.gates} running={running.length > 0} />
             </div>
+
+            {f.spec && f.gates.g1 !== "aprovado" && duvidas.abertas.length > 0 && (
+              <DoubtsPanel
+                owner={owner}
+                repo={repo}
+                feature={feature}
+                abertas={duvidas.abertas}
+                resolvidas={duvidas.resolvidas}
+                podeResponder={operador}
+                analistaRodando={running.length > 0}
+                versao={f.spec.data.versao}
+              />
+            )}
 
             <div className="card">
               <nav className="tabs" aria-label="Artefatos">
@@ -175,21 +190,14 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
                 <span className="badge badge-amber" style={{ alignSelf: "flex-start" }}>G1 · Spec</span>
                 {f.doubts.length > 0 ? (
                   <>
-                    <h3>O analista tem {f.doubts.length} dúvida(s)</h3>
-                    <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>
-                      {f.doubts.map((d, i) => (
-                        <li key={i}>{d}</li>
-                      ))}
-                    </ul>
-                    {operador ? (
-                      <ActionForm action={requestChanges} submit="Enviar respostas ao analista" variant="gate" resetOnOk>
-                        {hidden}
-                        <input type="hidden" name="gate" value="G1" />
-                        <textarea name="feedback" className="textarea" required placeholder="Responda cada dúvida, na ordem…" />
-                      </ActionForm>
-                    ) : (
-                      <p className="small muted">Aguardando o operador responder.</p>
-                    )}
+                    <h3>{f.doubts.length} dúvida(s) em aberto</h3>
+                    <p className="small muted">
+                      {running.length > 0
+                        ? "O analista está reprocessando a spec."
+                        : operador
+                          ? "Responda no painel ao lado e envie ao analista. O G1 libera quando não restar dúvida."
+                          : "Aguardando o operador responder."}
+                    </p>
                   </>
                 ) : operador ? (
                   <GateActions gate="G1" hidden={hidden} proximo="arquiteto-dados" />

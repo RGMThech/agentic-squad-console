@@ -387,3 +387,29 @@ code, pre, kbd { font-family: var(--mono); font-size: 0.9em; }
 .invite-form .alert { grid-column: 1 / -1; }
 @media (max-width: 1100px) { .invite-form { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 860px) { .invite-form { grid-template-columns: 1fr; } }
+
+/* ---------- dúvidas do analista ---------- */
+.doubt-list { list-style: none; margin: 0; padding: 0; }
+.doubt { padding: 18px 22px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.doubt-q { display: flex; gap: 12px; align-items: flex-start; }
+.doubt-q p { flex: 1; font-weight: 600; font-size: 14.5px; line-height: 1.45; }
+.doubt-n {
+  width: 26px; height: 26px; border-radius: 50%; flex: none; display: grid; place-items: center;
+  font-size: 12px; font-weight: 750; background: var(--amber-50); color: #8a6100;
+}
+.doubt-salva .doubt-n { background: var(--green-50); color: var(--green); }
+.doubt .textarea { min-height: 64px; margin-left: 38px; width: calc(100% - 38px); }
+.doubt > .xs { margin-left: 38px; }
+.doubt-actions { margin-left: 38px; }
+.doubt-salva .textarea { border-color: #b9e1cc; background: #fbfefc; }
+.doubt-footer {
+  display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 18px 22px;
+  background: #fafcfe; flex-wrap: wrap;
+}
+.doubt-footer > div { flex: 1; min-width: 240px; }
+.doubt-resolved { padding: 14px 22px; border-top: 1px solid var(--line); }
+.doubt-resolved summary { cursor: pointer; color: var(--muted); }
+.doubt-resolved ul { margin: 10px 0 0; padding-left: 20px; }
+@media (max-width: 860px) {
+  .doubt .textarea, .doubt > .xs, .doubt-actions { margin-left: 0; width: 100%; }
+}

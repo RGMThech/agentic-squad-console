@@ -9,9 +9,11 @@ import { store } from "./db";
 import { sendInvite } from "./mail";
 import { isValidEmail, normalizeEmail } from "./otp";
 import { requireUser } from "./session";
-import { listFeatureIds, listSquadPRs, loadFeature, loadSquad, prChecks, type SquadContext } from "./squad";
+import { isRunning, listFeatureIds, listRuns, listSquadPRs, loadFeature, loadSquad, prChecks, type SquadContext } from "./squad";
 import {
   RE_AGENT,
+  applyAnswers,
+  parseDoubts,
   RE_FEATURE,
   RE_NAME,
   can,
@@ -534,6 +536,81 @@ export async function setSquadMember(_: ActionState, fd: FormData): Promise<Acti
     return r.direto
       ? { ok: true, message: role ? `${email} agora é ${role} desta squad.` : `${email} saiu da squad.` }
       : { ok: true, message: "A branch principal é protegida: abri um Pull Request com a alteração.", url: r.url };
+  } catch (e) {
+    return { error: errMsg(e) };
+  }
+}
+
+// ---------------------------------------------------------------- dúvidas da spec (G1)
+
+/**
+ * Salva as respostas do Operador às dúvidas da spec e, se pedido, envia ao analista
+ * para reprocessar: incorporar respostas, reavaliar as demais dúvidas e abrir novas.
+ */
+export async function answerDoubts(_: ActionState, fd: FormData): Promise<ActionState> {
+  try {
+    const ctx = await ctxFrom(fd, "aprovar");
+    const feature = str(fd, "feature", 80);
+    const enviar = fd.get("intent") === "enviar";
+    if (!RE_FEATURE.test(feature)) return { error: "Feature inválida." };
+
+    const prs = await listSquadPRs(ctx);
+    const f = await loadFeature(ctx, feature, true, prs);
+    if (!f.branch || !f.spec) return { error: "A spec ainda não existe nesta feature." };
+
+    const rodando = (await listRuns(ctx, [], 15)).some((r) => r.feature === feature && isRunning(r));
+    if (rodando) return { error: "Um agente está trabalhando nesta feature agora. Aguarde terminar para salvar respostas." };
+
+    const n = Math.min(Number(fd.get("n") ?? 0) || 0, 100);
+    const respostas = new Map<string, string>();
+    for (let i = 0; i < n; i++) {
+      const q = String(fd.get(`q_${i}`) ?? "").trim();
+      if (!q) continue;
+      respostas.set(q, String(fd.get(`r_${i}`) ?? "").slice(0, 4000));
+    }
+    const atuais = new Map(parseDoubts(f.spec.body).abertas.map((d) => [d.texto, d.resposta ?? ""]));
+    const mudou = new Map([...respostas].filter(([q, r]) => atuais.has(q) && (atuais.get(q) ?? "").trim() !== r.trim()));
+
+    if (mudou.size) {
+      const { texto } = applyAnswers(f.spec.raw, mudou, ctx.user.email, todaySaoPaulo());
+      await writeFile(ctx.o, {
+        owner: ctx.owner,
+        repo: ctx.repo,
+        path: f.spec.path,
+        branch: f.branch,
+        sha: f.spec.sha,
+        content: texto,
+        message: `spec(${feature}): ${mudou.size} resposta(s) do Operador (${ctx.user.email})`,
+      });
+    }
+
+    if (!enviar) {
+      revalidatePath(`${base(ctx)}/f/${feature}`);
+      return { ok: true, message: mudou.size ? `${mudou.size} resposta(s) salva(s) na spec.` : "Nada mudou." };
+    }
+
+    // estado final das respostas para a instrução
+    const finais = new Map(atuais);
+    for (const [q, r] of mudou) finais.set(q, r.trim());
+    const respondidas = [...finais].filter(([, r]) => r);
+    if (!respondidas.length) return { error: "Responda pelo menos uma dúvida antes de enviar ao analista." };
+    const pendentes = [...finais].filter(([, r]) => !r).map(([q]) => q);
+
+    const lista = respondidas.map(([q, r], i) => `${i + 1}. Dúvida: ${q}\n   Resposta: ${r.replace(/\n/g, "\n   ")}`).join("\n");
+    const instrucao = `O Operador ${quem(ctx)} respondeu ${respondidas.length} dúvida(s) da spec ${feature}. As respostas estão registradas em "Dúvidas abertas" como "Resposta do Operador".
+
+Faça uma rodada de revisão da spec:
+1. Para cada dúvida respondida: incorpore a resposta nas regras de negócio, métricas e critérios de aceite; registre a decisão na seção "Decisões" (data, decisão e quem decidiu: ${ctx.user.email}); marque a dúvida como resolvida ("- [x]") ou remova-a de "Dúvidas abertas".
+2. Reavalie as dúvidas ainda sem resposta${pendentes.length ? ` (${pendentes.length})` : ""}: se alguma já foi esclarecida pelas respostas, resolva e registre em "Decisões" citando a resposta que a esclareceu.
+3. Se as respostas levantarem novas questões ou contradições, adicione novas dúvidas "- [ ]", claras e objetivas.
+4. Mantenha status: em_revisao e incremente "versao" no front matter.
+
+Respostas desta rodada:
+${lista}`;
+    await dispatch(ctx, "analista-requisitos", feature, instrucao);
+    await comment(ctx, f.pr?.number, `🧍 ${quem(ctx)} respondeu ${respondidas.length} dúvida(s) da spec e enviou ao analista para reprocessar.`);
+    revalidatePath(`${base(ctx)}/f/${feature}`);
+    return { ok: true, message: "Respostas enviadas. O analista vai reprocessar a spec; novas dúvidas, se houver, aparecem aqui." };
   } catch (e) {
     return { error: errMsg(e) };
   }

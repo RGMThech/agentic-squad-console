@@ -52,6 +52,88 @@ export function openDoubts(body: string): string[] {
     .map((l) => l.slice(5).trim());
 }
 
+// ---------- dúvidas com respostas ----------
+export type Doubt = { texto: string; resposta: string | null; autor: string | null };
+
+const RE_SECAO_DUVIDAS = /^## *\d*\.? *Dúvidas abertas[ \t]*$/;
+const RE_RESPOSTA = /^\s+- \*\*Resposta do Operador\*\*(?: \(([^)]*)\))?:\s?(.*)$/;
+
+function secaoDuvidas(lines: string[]): [number, number] | null {
+  const ini = lines.findIndex((l) => RE_SECAO_DUVIDAS.test(l));
+  if (ini < 0) return null;
+  let fim = lines.length;
+  for (let i = ini + 1; i < lines.length; i++) if (/^## /.test(lines[i])) { fim = i; break; }
+  return [ini + 1, fim];
+}
+
+/** Dúvidas da spec: abertas (com ou sem resposta do Operador) e resolvidas. */
+export function parseDoubts(body: string): { abertas: Doubt[]; resolvidas: string[] } {
+  const lines = body.split(/\r?\n/);
+  const sec = secaoDuvidas(lines);
+  const abertas: Doubt[] = [];
+  const resolvidas: string[] = [];
+  if (!sec) return { abertas, resolvidas };
+  for (let i = sec[0]; i < sec[1]; i++) {
+    const l = lines[i];
+    const aberta = l.match(/^- \[ \]\s*(.*)$/);
+    const fechada = l.match(/^- \[[xX]\]\s*(.*)$/);
+    if (fechada) resolvidas.push(fechada[1].trim());
+    if (!aberta) continue;
+    let resposta: string | null = null;
+    let autor: string | null = null;
+    for (let j = i + 1; j < sec[1] && /^\s+\S/.test(lines[j]); j++) {
+      const m = lines[j].match(RE_RESPOSTA);
+      if (!m) continue;
+      autor = m[1] ?? null;
+      const partes = [m[2]];
+      for (let k = j + 1; k < sec[1] && /^\s{4,}\S/.test(lines[k]) && !/^\s+- /.test(lines[k]); k++) partes.push(lines[k].trim());
+      resposta = partes.join("\n").trim();
+      break;
+    }
+    abertas.push({ texto: aberta[1].trim(), resposta, autor });
+  }
+  return { abertas, resolvidas };
+}
+
+/**
+ * Grava (ou substitui, ou remove com resposta vazia) a resposta do Operador
+ * logo abaixo de cada dúvida aberta indicada pelo texto. A dúvida continua
+ * "- [ ]" até o analista processar; o check_spec segue bloqueando o G1.
+ */
+export function applyAnswers(raw: string, respostas: Map<string, string>, quem: string, data: string): { texto: string; aplicadas: number } {
+  const lines = raw.split("\n");
+  const sec = secaoDuvidas(lines);
+  if (!sec) throw new Error('A spec não tem a seção "Dúvidas abertas".');
+  const out: string[] = lines.slice(0, sec[0]);
+  let aplicadas = 0;
+  for (let i = sec[0]; i < sec[1]; i++) {
+    const l = lines[i];
+    out.push(l);
+    const m = l.match(/^- \[ \]\s*(.*)$/);
+    if (!m || !respostas.has(m[1].trim())) continue;
+    // copia sub-itens que não são a resposta anterior
+    let j = i + 1;
+    while (j < sec[1] && /^\s+\S/.test(lines[j])) {
+      if (RE_RESPOSTA.test(lines[j])) {
+        j++;
+        while (j < sec[1] && /^\s{4,}\S/.test(lines[j]) && !/^\s+- /.test(lines[j])) j++;
+        continue;
+      }
+      out.push(lines[j]);
+      j++;
+    }
+    const resp = (respostas.get(m[1].trim()) ?? "").replace(/\r\n/g, "\n").trim();
+    if (resp) {
+      const [primeira, ...resto] = resp.split("\n");
+      out.push(`  - **Resposta do Operador** (${quem}, ${data}): ${primeira}`);
+      for (const r of resto) out.push(r.trim() ? `    ${r.trim()}` : "");
+    }
+    aplicadas++;
+    i = j - 1;
+  }
+  return { texto: out.concat(lines.slice(sec[1])).join("\n"), aplicadas };
+}
+
 // ---------- tarefas ----------
 export type Task = { id: string; tarefa: string; agente: string; ciclos: string; status: string };
 

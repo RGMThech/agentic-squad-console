@@ -3,7 +3,7 @@ import { AutoRefresh } from "@/components/AutoRefresh";
 import { IconExternal, IconPlus } from "@/components/Icons";
 import { PageHead } from "@/components/Shell";
 import { GatesMini, RoleBadge, RunBadge } from "@/components/Status";
-import { can } from "@/lib/core";
+import { can, parseDoubts } from "@/lib/core";
 import { ago, money } from "@/lib/format";
 import { getPRs, getSquad, type SquadParams } from "@/lib/page";
 import { isRunning, listFeatures, listRuns, type Feature } from "@/lib/squad";
@@ -14,10 +14,13 @@ function proximaAcao(f: Feature): { texto: string; voce: boolean } {
   const g = f.gates;
   if (g.g3 === "aprovado") return { texto: "Entregue", voce: false };
   if (g.g1 === "pendente") return { texto: "Analista escrevendo a spec", voce: false };
-  if (g.g1 === "aguardando")
-    return f.doubts.length
-      ? { texto: `Responder ${f.doubts.length} dúvida(s) da spec`, voce: true }
-      : { texto: "Aprovar a spec (G1)", voce: true };
+  if (g.g1 === "aguardando") {
+    if (!f.doubts.length) return { texto: "Aprovar a spec (G1)", voce: true };
+    const semResposta = f.spec ? parseDoubts(f.spec.body).abertas.filter((d) => !d.resposta).length : f.doubts.length;
+    return semResposta
+      ? { texto: `Responder ${semResposta} dúvida(s) da spec`, voce: true }
+      : { texto: "Enviar respostas ao analista", voce: true };
+  }
   if (g.g2 === "pendente") return { texto: "Arquiteto desenhando a solução", voce: false };
   if (g.g2 === "aguardando") return { texto: "Aprovar o design (G2)", voce: true };
   if (g.g3 === "aguardando") return { texto: "Aprovar produção (G3)", voce: true };
