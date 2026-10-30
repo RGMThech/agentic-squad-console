@@ -77,7 +77,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ owne
     const raiz = zip.folder(feature)!;
     const objetos = completarLocais(
       objetosDosContratos(textos.filter((t) => t.path.startsWith("contracts/"))),
-      textos.find((t) => t.path === `specs/${feature}/entrega.md`)?.texto,
+      textos.filter((t) => t.path.startsWith(`specs/${feature}/`)).sort((a) => (a.path.endsWith("entrega.md") ? -1 : 0)).map((t) => t.texto).join("\n"),
     );
     const leia = [
       `Entrega da feature ${feature} — ${f.titulo}`,

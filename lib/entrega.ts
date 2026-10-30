@@ -19,6 +19,8 @@ export type ObjetoEntrega = {
   objeto: string;
   camada: string;
   local: string | null;
+  /** Local deduzido do design (schema da camada), não declarado no contrato. */
+  localInferido?: boolean;
   descricao: string;
   colunas: number;
   pii: number;
@@ -129,12 +131,22 @@ export function objetosDosContratos(contratos: { path: string; texto: string }[]
   return out.sort((a, b) => (ord[a.camada] ?? 3) - (ord[b.camada] ?? 3) || a.objeto.localeCompare(b.objeto));
 }
 
-/** Completa o local físico dos objetos com o relatório de entrega (banco.schema.objeto citado nele). */
-export function completarLocais(objetos: ObjetoEntrega[], entrega: string | null | undefined): ObjetoEntrega[] {
-  if (!entrega) return objetos;
+/**
+ * Completa o local físico dos objetos a partir dos documentos da feature:
+ * 1) banco.schema.objeto citado (entrega.md, design, tarefas);
+ * 2) senão, o schema da camada citado no design (ex.: eleicoes2024.bronze) + o nome do objeto, marcado como inferido.
+ */
+export function completarLocais(objetos: ObjetoEntrega[], textos: string | null | undefined): ObjetoEntrega[] {
+  if (!textos) return objetos;
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return objetos.map((o) => {
     if (o.local) return o;
-    const m = entrega.match(new RegExp(`[\\w-]+\\.[\\w-]+\\.${o.objeto.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`));
-    return m ? { ...o, local: m[0] } : o;
+    const exato = textos.match(new RegExp(`[\\w-]+\\.[\\w-]+\\.${esc(o.objeto)}\\b`));
+    if (exato) return { ...o, local: exato[0] };
+    if (!o.camada) return o;
+    const contagem = new Map<string, number>();
+    for (const m of textos.matchAll(new RegExp(`\\b([A-Za-z_][\\w-]*)\\.${esc(o.camada)}\\b`, "g"))) contagem.set(m[1], (contagem.get(m[1]) ?? 0) + 1);
+    const banco = [...contagem.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    return banco ? { ...o, local: `${banco}.${o.camada}.${o.objeto}`, localInferido: true } : o;
   });
 }

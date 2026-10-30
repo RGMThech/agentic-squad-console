@@ -31,7 +31,7 @@ export async function EntregaView({ ctx, f, base }: { ctx: SquadContext; f: Feat
   const contratos = await Promise.all(
     arquivos.filter((a) => a.categoria === "contratos" && /\.ya?ml$/.test(a.path)).map(async (a) => ({ path: a.path, texto: ((await lerBytes(ctx, a.path, ref)) ?? Buffer.alloc(0)).toString("utf8") })),
   );
-  const objetos = completarLocais(objetosDosContratos(contratos), f.entrega?.body);
+  const objetos = completarLocais(objetosDosContratos(contratos), [f.entrega?.body, f.design?.body, f.tasksDoc?.body].filter(Boolean).join("\n"));
   const grupos = (Object.keys(ROTULO_CATEGORIA) as Categoria[]).map((c) => ({ c, itens: arquivos.filter((a) => a.categoria === c) })).filter((g) => g.itens.length);
   const entregue = f.gates.g3 === "aprovado";
   const contratoUrl = (p: string) => arquivos.find((a) => a.path === p)?.url;
@@ -88,7 +88,10 @@ export async function EntregaView({ ctx, f, base }: { ctx: SquadContext; f: Feat
                     <td>
                       <span className={`badge camada-${o.camada}`}>{o.camada || "—"}</span>
                     </td>
-                    <td className="mono xs">{o.local ?? <span className="muted">ver entrega.md</span>}</td>
+                    <td className="mono xs">
+                      {o.local ?? <span className="muted">não informado</span>}
+                      {o.localInferido && <div className="xs muted" style={{ fontFamily: "inherit" }}>pelo design</div>}
+                    </td>
                     <td className="num">{o.colunas}</td>
                     <td className="num">{o.pii ? <span className="badge badge-amber">{o.pii}</span> : "0"}</td>
                     <td className="xs">

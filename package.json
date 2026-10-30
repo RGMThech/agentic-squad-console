@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start -p ${PORT:-3000}",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --experimental-strip-types tests/*.test.ts"
+    "test": "node --test --conditions=react-server --experimental-strip-types tests/*.test.ts"
   },
   "license": "UNLICENSED",
   "dependencies": {
