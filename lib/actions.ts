@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import sodium from "libsodium-wrappers";
 import { env } from "./env";
-import { appBotLogin, errMsg, gh, readFile, status, writeFile } from "./github";
+import { appBotLogin, errDetail, errMsg, gh, missingPermissions, readFile, resetAppCache, status, writeFile } from "./github";
 import { store } from "./db";
 import { sendInvite } from "./mail";
 import { isValidEmail, normalizeEmail } from "./otp";
@@ -396,7 +396,15 @@ export async function createSquad(_: ActionState, fd: FormData): Promise<ActionS
       return { error: `O template mudou de endereço: agora é ${template.full_name}. Atualize a variável SQUAD_TEMPLATE_REPO.` };
     if (!template.is_template)
       return { error: `O repositório ${template.full_name} ainda não está marcado como template. No GitHub: Settings → marque "Template repository".` };
-    const existente = await o.repos.get({ owner, repo: nome }).then(() => true).catch((e) => (status(e) === 404 ? false : Promise.reject(e)));
+    resetAppCache(); // relê as permissões aprovadas na instalação
+    const perms = await missingPermissions();
+    if (perms.faltando.length)
+      return {
+        error: `A instalação do GitHub App em ${owner} não tem estas permissões: ${perms.faltando.join(", ")}. Ajuste em Developer settings → GitHub Apps → Edit → Permissions e aprove em ${owner} → Settings → GitHub Apps → Configure (Review request).`,
+      };
+    if (perms.selecao && perms.selecao !== "all")
+      return { error: `O GitHub App está instalado só em repositórios selecionados. Em ${owner} → Settings → GitHub Apps → Configure, escolha "All repositories" para que as squads novas fiquem acessíveis.` };
+    const existente = await (await gh()).repos.get({ owner, repo: nome }).then(() => true).catch((e) => (status(e) === 404 ? false : Promise.reject(e)));
     if (existente) return { error: `Já existe um repositório ${owner}/${nome}. Escolha outro nome.` };
 
     try {
@@ -409,10 +417,11 @@ export async function createSquad(_: ActionState, fd: FormData): Promise<ActionS
         description: descricao || `Squad agêntica de Data Analytics — ${cliente || nome}`,
       });
     } catch (e) {
+      console.error("[nova squad] createUsingTemplate:", errDetail(e), e);
       const msg = errMsg(e);
       if (status(e) === 403 || status(e) === 404)
-        return { error: `O GitHub App não tem permissão para criar repositórios em ${owner}. Dê ao App a permissão "Administration: Read and write" e instale-o em "All repositories". Detalhe: ${msg}` };
-      return { error: `Falha ao criar o repositório: ${msg}` };
+        return { error: `O GitHub App não conseguiu criar repositórios em ${owner}. Confira se o App tem "Administration", "Contents" e "Workflows" como Read and write, aprovadas na instalação, e se está em "All repositories". Detalhe: ${errDetail(e)}` };
+      return { error: `Falha ao criar o repositório: ${msg || errDetail(e)}` };
     }
 
     // a geração a partir do template é assíncrona: espera o conteúdo aparecer

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { explainDbError, explainGithubError, explainMailError } from "@/lib/diagnose";
 import { store } from "@/lib/db";
 import { env } from "@/lib/env";
-import { appBotLogin, gh } from "@/lib/github";
+import { appBotLogin, gh, missingPermissions } from "@/lib/github";
 import { verifyMail } from "@/lib/mail";
 
 export const dynamic = "force-dynamic";
@@ -70,7 +70,13 @@ export async function GET(req: Request) {
     } catch {
       template = ` Atenção: o App não acessa ${env.templateRepo} (confira SQUAD_TEMPLATE_REPO e a instalação em All repositories).`;
     }
-    r.github = { ok: true, detalhe: `App autenticado e instalado em ${env.githubOrg} (bot ${bot}).${template}` };
+    const perms = await missingPermissions();
+    const faltam = perms.faltando.length ? ` Permissões faltando na instalação: ${perms.faltando.join(", ")} (ajuste no App e aprove em Configure → Review request).` : " Permissões completas.";
+    const sel = perms.selecao === "all" ? "" : ` Atenção: instalado só em repositórios selecionados; escolha "All repositories".`;
+    r.github = {
+      ok: !perms.faltando.length && perms.selecao === "all" && !/Atenção/.test(template),
+      detalhe: `App autenticado e instalado em ${env.githubOrg} (bot ${bot}).${faltam}${sel}${template}`,
+    };
   } catch (e) {
     console.error("[health] github:", e);
     r.github = { ok: false, detalhe: explainGithubError(e) };
