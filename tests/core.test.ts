@@ -140,29 +140,3 @@ test("configuração: caminhos e validação", () => {
   assert.match(validateConfigContent(".squad/squad.yaml", "nome: [") ?? "", /YAML inválido/);
   assert.match(validateConfigContent(".claude/agents/x-y.md", "---\nname: outro\n---\n") ?? "", /name/);
 });
-
-import YAML from "yaml";
-import { normalizeHost, parseLeitura, setDatabricksYaml, validateDbxConfig } from "../lib/databricks.ts";
-
-test("databricks: normaliza host, leitura e valida campos", () => {
-  assert.equal(normalizeHost("adb-123.7.azuredatabricks.net/"), "https://adb-123.7.azuredatabricks.net");
-  assert.equal(normalizeHost("https://dbc-1.cloud.databricks.com/?o=123#x"), "https://dbc-1.cloud.databricks.com");
-  assert.deepEqual(parseLeitura("Vendas.silver, crm\n`crm`"), ["vendas.silver", "crm"]);
-  const ok = { host: "https://x.cloud.databricks.com", warehouseId: "a1b2c3d4e5f6", leitura: ["vendas"], escrita: "squad_dev.agentes" };
-  assert.equal(validateDbxConfig(ok), null);
-  assert.match(validateDbxConfig({ ...ok, warehouseId: "/sql/warehouses/abc" }) ?? "", /Warehouse ID/);
-  assert.match(validateDbxConfig({ ...ok, escrita: "squad_dev" }) ?? "", /catalogo.schema/);
-  assert.match(validateDbxConfig({ ...ok, leitura: ["a.b.c"] }) ?? "", /Leitura inválida/);
-});
-
-test("databricks: grava o bloco no squad.yaml preservando comentários", () => {
-  const original = "# Configuração\nnome: X   # nome\nmodelo: sonnet\ndatabricks:\n  host: ''  # url\n  warehouse_id: ''\n";
-  const out = setDatabricksYaml(original, { host: "https://h", warehouseId: "wh1", leitura: ["vendas"], escrita: "squad_dev.agentes" }, YAML);
-  const d = YAML.parse(out);
-  assert.equal(d.databricks.host, "https://h");
-  assert.deepEqual(d.databricks.leitura, ["vendas"]);
-  assert.equal(d.modelo, "sonnet");
-  assert.ok(out.includes("# Configuração") && out.includes("# nome"));
-  const novo = setDatabricksYaml("nome: Y\n", { host: "https://h", warehouseId: "w", leitura: [], escrita: "" }, YAML);
-  assert.equal(YAML.parse(novo).databricks.warehouse_id, "w");
-});

@@ -1,4 +1,5 @@
 import "server-only";
+import { dbtPedido, lerDados, type DadosConfig } from "./dados-meta";
 import YAML from "yaml";
 import { env } from "./env";
 import { gh, listDir, readFile, status, type GH } from "./github";
@@ -38,7 +39,8 @@ export type SquadConfig = {
   max_turnos: number;
   alerta_custo_usd: number;
   console_bot: string;
-  databricks: { host: string; warehouseId: string; leitura: string[]; escrita: string } | null;
+  dados: DadosConfig | null;
+  dbt: boolean;
 };
 
 export type SquadContext = {
@@ -135,7 +137,8 @@ const DEFAULT_CONFIG: SquadConfig = {
   max_turnos: 60,
   alerta_custo_usd: 5,
   console_bot: "",
-  databricks: null,
+  dados: null,
+  dbt: false,
 };
 
 export function parseConfig(text: string | null, fallbackName: string): SquadConfig {
@@ -155,15 +158,8 @@ export function parseConfig(text: string | null, fallbackName: string): SquadCon
     max_turnos: Number(d.max_turnos ?? DEFAULT_CONFIG.max_turnos),
     alerta_custo_usd: Number(d.alerta_custo_usd ?? DEFAULT_CONFIG.alerta_custo_usd),
     console_bot: String(d.console_bot ?? ""),
-    databricks: (() => {
-      const x = (d.databricks ?? null) as Record<string, unknown> | null;
-      if (!x || typeof x !== "object") return null;
-      const host = String(x.host ?? "").trim();
-      const warehouseId = String(x.warehouse_id ?? "").trim();
-      if (!host && !warehouseId) return null;
-      const leitura = Array.isArray(x.leitura) ? x.leitura.map(String) : String(x.leitura ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-      return { host, warehouseId, leitura, escrita: String(x.escrita ?? "").trim() };
-    })(),
+    dados: lerDados(d),
+    dbt: dbtPedido(d),
   };
 }
 

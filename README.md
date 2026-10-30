@@ -14,7 +14,7 @@ Funciona junto com o template [`agentic-data-squad`](https://github.com/RGMThech
 | **Equipe** | Operadores, membros e leitores por e-mail, gravados no `.squad/members.yaml` da squad. |
 | **Features e gates** | Abrir pedidos, acompanhar os agentes, aprovar G1 e G2, pedir ajustes, aprovar G3 (merge). |
 | **Custos** | Custo, turnos e duração por execução, por agente, por feature e por mês. |
-| **Configuração** | Agentes, `AGENTS.md`, skills, chave da API e conexão Databricks (com teste antes de salvar). Alterações viram Pull Request. |
+| **Configuração** | Agentes, `AGENTS.md`, skills, chave da API e acesso a dados — Databricks, Snowflake, BigQuery ou Fabric, com dbt opcional (testado antes de salvar). Alterações viram Pull Request. |
 
 ## Como funciona
 

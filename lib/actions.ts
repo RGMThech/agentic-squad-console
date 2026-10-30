@@ -10,7 +10,8 @@ import { sendInvite } from "./mail";
 import { isValidEmail, normalizeEmail } from "./otp";
 import { requireUser } from "./session";
 import { isRunning, listFeatureIds, listRuns, listSquadPRs, loadFeature, loadSquad, prChecks, secretStatus, type SquadContext } from "./squad";
-import { normalizeHost, parseLeitura, setDatabricksYaml, testConnection, validateDbxConfig, type Check, type DbxConfig } from "./databricks";
+import { normalizeConexao, parseLeitura, setDadosYaml, testConnection, validateDados, validateSegredos, type Check } from "./dados";
+import { ehPlataforma, PLATAFORMAS, type DadosConfig } from "./dados-meta";
 import {
   RE_AGENT,
   applyAnswers,
@@ -372,54 +373,63 @@ export async function setApiKey(_: ActionState, fd: FormData): Promise<ActionSta
   }
 }
 
-// ---------------------------------------------------------------- Databricks
+// ---------------------------------------------------------------- acesso a dados
 
-export type DbxState = ActionState & { checks?: Check[]; salvo?: boolean };
+export type DadosState = ActionState & { checks?: Check[]; salvo?: boolean };
 
 /** Testa a conexão com as credenciais informadas e, se passar, grava segredos e configuração. */
-export async function saveDatabricks(_: DbxState, fd: FormData): Promise<DbxState> {
+export async function saveDados(_: DadosState, fd: FormData): Promise<DadosState> {
   try {
     const ctx = await ctxFrom(fd, "configurar");
     const somenteTestar = fd.get("intent") === "testar";
-    const cfg: DbxConfig = {
-      host: normalizeHost(str(fd, "host", 300)),
-      warehouseId: str(fd, "warehouse", 80),
+    const plataforma = str(fd, "plataforma", 30);
+    if (!ehPlataforma(plataforma)) return { error: "Escolha a plataforma de dados." };
+    const meta = PLATAFORMAS[plataforma];
+    const cfg: DadosConfig = {
+      plataforma,
+      conexao: normalizeConexao(plataforma, Object.fromEntries(meta.campos.map((c) => [c.k, str(fd, `cx_${c.k}`, 300)]))),
       leitura: parseLeitura(str(fd, "leitura", 2000)),
-      escrita: str(fd, "escrita", 200).replace(/`/g, "").toLowerCase(),
+      escrita: str(fd, "escrita", 200).replace(/[`"[\]]/g, "").toLowerCase(),
+      dbt: fd.get("dbt") === "on",
     };
-    const invalido = validateDbxConfig(cfg);
+    const invalido = validateDados(cfg);
     if (invalido) return { error: invalido };
-    const clientId = str(fd, "clientId", 200);
-    const secret = String(fd.get("secret") ?? "").trim();
-    const jaTemSegredo = (await secretStatus(ctx, "DATABRICKS_CLIENT_SECRET")).set;
+
+    const informados = Object.fromEntries(
+      meta.segredos.map((s) => [s.nome, String(fd.get(`sg_${s.nome}`) ?? "").trim().slice(0, 20000)]),
+    );
+    const preenchidos = meta.segredos.filter((s) => informados[s.nome]);
+    const todos = preenchidos.length === meta.segredos.length;
+    const situacao = await Promise.all(meta.segredos.map((s) => secretStatus(ctx, s.nome)));
+    const jaTem = situacao.every((x) => x.set);
+    const nomes = meta.segredos.map((s) => s.label).join(" e ");
 
     let checks: Check[] | undefined;
-    if (clientId && secret) {
-      checks = await testConnection(cfg, clientId, secret);
+    if (todos) {
+      const ruim = validateSegredos(plataforma, informados);
+      if (ruim) return { error: ruim };
+      checks = await testConnection(cfg, informados);
       if (somenteTestar || checks.some((c) => !c.ok)) {
         return checks.some((c) => !c.ok)
           ? { error: "A conexão não passou em todas as checagens. Nada foi salvo.", checks }
-          : { ok: true, message: "Conexão OK. Clique em Salvar para gravar.", checks };
+          : { ok: true, message: "Conexão OK. Clique em Testar e salvar para gravar.", checks };
       }
-    } else if (somenteTestar || !jaTemSegredo) {
-      return { error: "Informe o Client ID e o Client secret para testar e salvar." };
-    } else if (clientId || secret) {
-      return { error: "Para trocar as credenciais, informe Client ID e Client secret juntos." };
+    } else if (preenchidos.length) {
+      return { error: `Para trocar as credenciais, informe ${nomes} juntos.` };
+    } else if (somenteTestar || !jaTem) {
+      return { error: `Informe ${nomes} para testar e salvar.` };
     }
 
-    if (clientId && secret) {
-      await putRepoSecret(ctx, "DATABRICKS_CLIENT_ID", clientId);
-      await putRepoSecret(ctx, "DATABRICKS_CLIENT_SECRET", secret);
-    }
+    if (todos) for (const s of meta.segredos) await putRepoSecret(ctx, s.nome, informados[s.nome]);
     const atual = await readFile(ctx.o, ctx.owner, ctx.repo, ".squad/squad.yaml", ctx.defaultBranch);
     const YAML = await import("yaml");
-    const novo = setDatabricksYaml(atual?.content ?? "", cfg, YAML);
+    const novo = setDadosYaml(atual?.content ?? "", cfg, YAML);
     let pr: string | undefined;
     if (novo !== (atual?.content ?? "")) {
-      const r = await commitDiretoOuPR(ctx, ".squad/squad.yaml", novo, "acesso ao Databricks");
+      const r = await commitDiretoOuPR(ctx, ".squad/squad.yaml", novo, `acesso a dados (${meta.rotulo})`);
       if (!r.direto) pr = r.url;
     }
-    await (await store()).audit({ actor: ctx.user.email, action: "squad.databricks", target: `${ctx.owner}/${ctx.repo}: ${cfg.host}` });
+    await (await store()).audit({ actor: ctx.user.email, action: "squad.dados", target: `${ctx.owner}/${ctx.repo}: ${meta.rotulo}` });
     revalidatePath(`${base(ctx)}/config`);
     return {
       ok: true,
@@ -427,9 +437,9 @@ export async function saveDatabricks(_: DbxState, fd: FormData): Promise<DbxStat
       checks,
       url: pr,
       message: pr
-        ? "Credenciais salvas nos segredos do GitHub. A branch principal é protegida: abri um PR com a configuração (host, warehouse, catálogos)."
-        : clientId
-          ? "Conexão testada e salva. Os agentes já podem consultar o Databricks."
+        ? "Credenciais salvas nos segredos do GitHub. A branch principal é protegida: abri um PR com a configuração."
+        : todos
+          ? `Conexão testada e salva. Os agentes já podem consultar o ${meta.rotulo}.`
           : "Configuração atualizada (credenciais mantidas).",
     };
   } catch (e) {
@@ -509,19 +519,27 @@ export async function createSquad(_: ActionState, fd: FormData): Promise<ActionS
       const repoInfo = (await o.repos.get({ owner, repo: nome })).data;
       etapa = "adicionar o tópico";
       await o.repos.replaceAllTopics({ owner, repo: nome, names: [env.topic] });
-      const yamlStr = (v: string) => JSON.stringify(v);
-      const cfg = [
-        "# Configuração da squad — lida pelo Console e pelo workflow squad-agent",
-        `nome: ${yamlStr(str(fd, "titulo", 120) || nome)}`,
-        `cliente: ${yamlStr(cliente)}`,
-        `descricao: ${yamlStr(descricao)}`,
-        `plataforma: ${slugify(plataforma, 30)}`,
-        `modelo: ${yamlStr(modelo)}`,
-        "max_turnos: 60",
-        "alerta_custo_usd: 5",
-        `console_bot: ${yamlStr(await appBotLogin())}   # bot do GitHub App do Squad Console`,
-        "",
-      ].join("\n");
+      // edita o squad.yaml do template preservando comentários e blocos (ex.: "dados")
+      const YAML = await import("yaml");
+      const doc = YAML.parseDocument(squadYaml.content || "");
+      if (!doc.contents) doc.contents = doc.createNode({}) as never;
+      doc.set("nome", str(fd, "titulo", 120) || nome);
+      doc.set("cliente", cliente);
+      doc.set("descricao", descricao);
+      doc.set("plataforma", ehPlataforma(plataforma) ? plataforma : "agnostico");
+      doc.set("modelo", modelo);
+      doc.set("console_bot", await appBotLogin());
+      const usaDbt = fd.get("dbt") === "on";
+      if (ehPlataforma(plataforma) || usaDbt) {
+        const dados = doc.get("dados");
+        if (dados && YAML.isMap(dados)) {
+          if (ehPlataforma(plataforma)) dados.set("plataforma", plataforma);
+          dados.set("dbt", usaDbt);
+        } else {
+          doc.set("dados", { plataforma: ehPlataforma(plataforma) ? plataforma : "", conexao: {}, leitura: [], escrita: "", dbt: usaDbt });
+        }
+      }
+      const cfg = String(doc);
       etapa = "gravar .squad/squad.yaml";
       await writeFile(o, {
         owner, repo: nome, path: ".squad/squad.yaml", branch: repoInfo.default_branch,

@@ -176,3 +176,16 @@ O console não usa mais login com GitHub. Para fechar essa porta:
 | "O GitHub App não conseguiu se autenticar" | `GITHUB_APP_ID` ou chave errados | Gere uma nova chave e cole o base64 de novo |
 | Agente recusado em "Validar pedido" | `console_bot` ausente no `.squad/squad.yaml`, ou a pessoa não está na equipe | Configuração → Saúde da instalação mostra o valor certo |
 | Equipe alterada mas a mudança não aparece | `main` protegida: o console abriu um PR | Aplique o PR, ou adicione o App ao bypass do ruleset (passo 3.4) |
+
+## Acesso a dados (teste de conexão)
+
+O botão **Testar conexão** do card *Acesso a dados* é executado pelo servidor do console. Ele precisa de saída para:
+
+| Plataforma | Destino |
+|------------|---------|
+| Databricks | o host do workspace, porta 443 |
+| Snowflake | `<conta>.snowflakecomputing.com`, porta 443 |
+| BigQuery | `oauth2.googleapis.com` e `bigquery.googleapis.com`, porta 443 |
+| Microsoft Fabric | `login.microsoftonline.com` (443) e o SQL endpoint `*.datawarehouse.fabric.microsoft.com`, **porta 1433** |
+
+Se a hospedagem bloquear a porta 1433 de saída, o teste do Fabric para em "Conexão ao SQL endpoint". Os agentes não são afetados, porque rodam no GitHub Actions.

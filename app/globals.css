@@ -421,3 +421,10 @@ code, pre, kbd { font-family: var(--mono); font-size: 0.9em; }
 .dbx-checks li { display: flex; gap: 10px; align-items: flex-start; }
 @media (max-width: 1100px) { .dbx-resumo { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .wrap-any { overflow-wrap: anywhere; word-break: break-word; }
+
+/* ---------- acesso a dados: seletor de plataforma ---------- */
+.seg { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px; background: #f1f5f9; border: 1px solid var(--line); border-radius: 10px; }
+.seg-item { border: 0; background: transparent; padding: 7px 14px; border-radius: 7px; font: inherit; font-size: 13.5px; font-weight: 600; color: var(--muted); cursor: pointer; }
+.seg-item:hover { color: var(--blue); }
+.seg-item.on { background: #fff; color: var(--blue); box-shadow: 0 1px 2px rgba(15, 30, 60, 0.12); }
+.seg-item:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }

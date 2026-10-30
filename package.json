@@ -23,6 +23,7 @@
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "server-only": "^0.0.1",
+    "tedious": "^20.3.8",
     "yaml": "^2.9.1"
   },
   "devDependencies": {

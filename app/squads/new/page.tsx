@@ -52,7 +52,6 @@ export default async function NewSquadPage() {
                     <option value="snowflake">Snowflake</option>
                     <option value="bigquery">BigQuery</option>
                     <option value="fabric">Microsoft Fabric</option>
-                    <option value="dbt">dbt</option>
                   </select>
                 </div>
                 <div className="field">
@@ -64,6 +63,13 @@ export default async function NewSquadPage() {
                   </select>
                 </div>
               </div>
+              <label className="check">
+                <input type="checkbox" name="dbt" />
+                <span>
+                  <b>Usar dbt</b>
+                  <span className="small muted"> — os agentes modelam as transformações em dbt, sobre a plataforma escolhida.</span>
+                </span>
+              </label>
             </ActionForm>
           </div>
           <div className="card card-pad stack-sm">
@@ -71,6 +77,7 @@ export default async function NewSquadPage() {
             <ol className="small muted" style={{ paddingLeft: 18, margin: 0 }}>
               <li>Cadastre a chave da API da Anthropic na configuração da squad.</li>
               <li>Monte a equipe: operadores, membros e leitores, por e-mail.</li>
+              <li>Conecte a plataforma de dados em Acesso a dados (o console testa antes de salvar).</li>
               <li>No GitHub, proteja a branch principal (ruleset) exigindo PR e a checagem do harness.</li>
               <li>Abra a primeira feature.</li>
             </ol>
