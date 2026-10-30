@@ -20,12 +20,16 @@ const ROTULO: Record<string, string> = {
   "squad.criar": "Criou squad",
   "squad.membro": "Alterou equipe",
   "squad.remover_membro": "Removeu da equipe",
+  "squad.databricks": "Configurou acesso a dados",
+  "squad.dados": "Configurou acesso a dados",
+  erro: "Erro no servidor",
 };
 
 export default async function AuditoriaPage() {
   await requireAdmin();
   const eventos = await (await store()).listAudit(200);
   const alerta = (a: string) => a === "login.codigo_negado" || a === "login.codigo_errado";
+  const grave = (a: string) => a === "erro";
 
   return (
     <>
@@ -52,8 +56,8 @@ export default async function AuditoriaPage() {
                   <tr key={i}>
                     <td className="small nowrap">{when(e.at.toISOString())}</td>
                     <td className="small">{e.actor}</td>
-                    <td>{alerta(e.action) ? <span className="badge badge-amber">{ROTULO[e.action] ?? e.action}</span> : <span className="small">{ROTULO[e.action] ?? e.action}</span>}</td>
-                    <td className="small muted">{e.target ?? "—"}</td>
+                    <td>{grave(e.action) ? <span className="badge badge-red">{ROTULO[e.action]}</span> : alerta(e.action) ? <span className="badge badge-amber">{ROTULO[e.action] ?? e.action}</span> : <span className="small">{ROTULO[e.action] ?? e.action}</span>}</td>
+                    <td className={`small muted${grave(e.action) ? " mono xs wrap-any" : ""}`}>{e.target ?? "—"}</td>
                   </tr>
                 ))}
               </tbody>

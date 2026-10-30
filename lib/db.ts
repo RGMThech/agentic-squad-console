@@ -76,6 +76,8 @@ const MIGRATIONS = [
      ip VARCHAR(64) NULL,
      INDEX idx_at (at)
    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  // erros do servidor são registrados na auditoria com mensagem e local: precisa de mais que 255 caracteres
+  `ALTER TABLE sc_audit MODIFY target TEXT NULL`,
 ];
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -151,7 +153,7 @@ async function mysqlStore(url: string): Promise<Store> {
       await q("DELETE FROM sc_login_codes WHERE created_at < (UTC_TIMESTAMP() - INTERVAL 7 DAY)");
     },
     async audit(e) {
-      await q("INSERT INTO sc_audit (actor, action, target, ip) VALUES (?, ?, ?, ?)", [e.actor, e.action, e.target ?? null, e.ip ?? null]);
+      await q("INSERT INTO sc_audit (actor, action, target, ip) VALUES (?, ?, ?, ?)", [e.actor, e.action, e.target?.slice(0, 4000) ?? null, e.ip ?? null]);
     },
     async listAudit(limit) {
       const n = Math.max(1, Math.min(500, Math.floor(limit)));

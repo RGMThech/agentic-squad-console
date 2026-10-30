@@ -57,7 +57,7 @@ export default function ErrorPage({ error, reset }: { error: Error & { digest?: 
         <p className="muted small">{/omitted in production builds/i.test(error.message || "") ? "O servidor encontrou um erro ao montar esta página." : error.message || "Erro inesperado."}</p>
         {error.digest && <p className="xs muted mono">ref: {error.digest}</p>}
         <p className="xs muted">
-          Administrador: abra <a href="/api/health?verificar=1" target="_blank" rel="noreferrer">/api/health?verificar=1</a> para ver qual configuração falhou (banco, e-mail ou GitHub).
+          Administrador: o detalhe deste erro fica em <a href="/admin/auditoria">Auditoria</a> (evento “Erro no servidor”{error.digest ? `, ref ${error.digest}` : ""}). Para checar banco, e-mail e GitHub, abra <a href="/api/health?verificar=1" target="_blank" rel="noreferrer">/api/health?verificar=1</a>.
         </p>
         <div className="row">
           <button className="btn btn-primary" onClick={reset}>Tentar de novo</button>
