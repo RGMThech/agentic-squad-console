@@ -428,3 +428,34 @@ code, pre, kbd { font-family: var(--mono); font-size: 0.9em; }
 .seg-item:hover { color: var(--blue); }
 .seg-item.on { background: #fff; color: var(--blue); box-shadow: 0 1px 2px rgba(15, 30, 60, 0.12); }
 .seg-item:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+
+/* ---------- situação da feature ---------- */
+.sit { border-left: 5px solid var(--line-2); overflow: hidden; }
+.sit-head { display: flex; gap: 16px; align-items: flex-start; padding: 18px 20px; }
+.sit-icon { width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; flex: none; background: #eef2f7; color: var(--muted); }
+.sit-icon .dot { width: 12px; height: 12px; }
+.sit-text { flex: 1; min-width: 0; }
+.sit-kicker { font-size: 11.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.sit-text h2 { margin: 2px 0 4px; font-size: 19px; }
+.sit-text p { margin: 0; color: var(--muted); font-size: 14px; }
+.sit-meta { display: flex; align-items: center; gap: 6px; margin-top: 8px !important; }
+.sit-cta { flex: none; align-self: center; }
+.sit-msg { border-top: 1px solid var(--line); background: #fafcfe; padding: 14px 20px 6px; max-height: 340px; overflow: auto; }
+.sit-msg-head { margin-bottom: 6px; }
+.sit-rodando { border-left-color: var(--blue); }
+.sit-rodando .sit-icon { background: var(--blue-50); color: var(--blue); }
+.sit-rodando .sit-kicker { color: var(--blue); }
+.sit-voce { border-left-color: var(--amber); }
+.sit-voce .sit-icon { background: var(--amber-50); color: #8a6100; }
+.sit-voce .sit-kicker { color: #8a6100; }
+.sit-erro { border-left-color: var(--red); }
+.sit-erro .sit-icon { background: var(--red-50); color: var(--red); }
+.sit-erro .sit-kicker { color: var(--red); }
+.sit-entregue { border-left-color: var(--green); }
+.sit-entregue .sit-icon { background: var(--green-50); color: var(--green); }
+.sit-entregue .sit-kicker { color: var(--green); }
+@media (max-width: 720px) {
+  .sit-head { flex-wrap: wrap; }
+  .sit-cta { width: 100%; justify-content: center; }
+}
+:target { scroll-margin-top: 16px; }

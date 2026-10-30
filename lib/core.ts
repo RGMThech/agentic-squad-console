@@ -399,3 +399,103 @@ Você é o agente **${name}**. Leia \`AGENTS.md\` antes de tudo.
 - Nunca aprove gates.
 `;
 }
+
+// ---------- situação da feature: em execução, precisa de você, falhou ou entregue ----------
+
+export type SituacaoTipo = "rodando" | "voce" | "erro" | "entregue";
+export type SituacaoAcao = "responder" | "enviar_respostas" | "g1" | "g2" | "g3" | "acionar" | "aguardar";
+
+export type Situacao = {
+  tipo: SituacaoTipo;
+  titulo: string;
+  detalhe: string;
+  acao: SituacaoAcao;
+  agente?: string;
+  instrucao?: string;
+};
+
+export type SituacaoInput = {
+  feature: string;
+  gates: { g1: GateState; g2: GateState; g3: GateState };
+  duvidasSemResposta: number;
+  duvidasTotal: number;
+  rodando: { agente: string; desde: string; fila: boolean } | null;
+  ultima: { agente: string; ok: boolean; resumo: string } | null;
+  tarefas: { status: string }[];
+};
+
+const RE_BLOQUEIO = /decis[aã]o necess[aá]ria|bloquead|para destravar|preciso que (voc[eê]|o operador)|aguardando (o )?operador|precisa(mos)? do operador|o que preciso/i;
+
+/** Uma frase para cada estado: ninguém fica sem saber se a squad está trabalhando ou esperando. */
+export function situacao(i: SituacaoInput): Situacao {
+  const g = i.gates;
+  if (g.g3 === "aprovado") return { tipo: "entregue", titulo: "Entregue", detalhe: "O PR foi mesclado na branch principal.", acao: "aguardar" };
+  if (i.rodando) {
+    return {
+      tipo: "rodando",
+      titulo: i.rodando.fila ? `${i.rodando.agente} na fila do GitHub` : `${i.rodando.agente} trabalhando`,
+      detalhe: i.rodando.fila
+        ? "A execução começa em instantes. Você não precisa fazer nada; esta página atualiza sozinha."
+        : "Você não precisa fazer nada agora. Esta página atualiza sozinha e avisa quando for a sua vez.",
+      acao: "aguardar",
+      agente: i.rodando.agente,
+    };
+  }
+  if (i.ultima && !i.ultima.ok)
+    return {
+      tipo: "erro",
+      titulo: `A última execução do ${i.ultima.agente} falhou`,
+      detalhe: "Nada está rodando. Veja o motivo nos logs e acione o agente de novo (ajuste a instrução se for preciso).",
+      acao: "acionar",
+      agente: i.ultima.agente,
+    };
+  if (g.g1 === "aguardando") {
+    if (i.duvidasSemResposta > 0)
+      return { tipo: "voce", titulo: `Responda ${i.duvidasSemResposta} dúvida(s) da spec`, detalhe: "O analista parou esperando suas respostas. Responda abaixo e envie ao analista.", acao: "responder" };
+    if (i.duvidasTotal > 0)
+      return { tipo: "voce", titulo: "Envie as respostas ao analista", detalhe: "Todas as dúvidas têm resposta. Envie para o analista incorporá-las na spec.", acao: "enviar_respostas" };
+    return { tipo: "voce", titulo: "Aprove a spec (G1)", detalhe: "A spec está pronta e sem dúvidas. Revise e aprove, ou peça ajustes.", acao: "g1" };
+  }
+  if (g.g2 === "aguardando")
+    return { tipo: "voce", titulo: "Aprove o design (G2)", detalhe: "O arquiteto terminou. Revise o design e aprove, ou peça ajustes.", acao: "g2" };
+  if (g.g3 === "aguardando")
+    return { tipo: "voce", titulo: "Aprove a produção (G3)", detalhe: "QA e revisor aprovaram. Aprovar mescla o PR na branch principal.", acao: "g3" };
+
+  const passo = nextStep(g, i.feature);
+  const bloqueadas = i.tarefas.filter((t) => t.status === "bloqueado").length;
+  const andando = i.tarefas.filter((t) => ["em_andamento", "em_qa", "pendente", "reprovado"].includes(t.status)).length;
+  if (i.ultima && (RE_BLOQUEIO.test(i.ultima.resumo) || (bloqueadas > 0 && andando === 0)))
+    return {
+      tipo: "voce",
+      titulo: "A squad está bloqueada e precisa de você",
+      detalhe: `O ${i.ultima.agente} parou e pediu uma decisão ou um acesso. Leia a mensagem abaixo, resolva o que ele pede e acione de novo, explicando o que mudou.`,
+      acao: "acionar",
+      agente: passo.agente,
+      instrucao: "Resolvi as pendências: <descreva aqui o que você fez ou decidiu>. Continue a partir de onde parou.",
+    };
+  if (g.g1 === "pendente")
+    return { tipo: "voce", titulo: "Acione o analista para escrever a spec", detalhe: "Nada está rodando e a spec ainda não existe.", acao: "acionar", ...passo };
+  if (g.g2 === "pendente")
+    return { tipo: "voce", titulo: "Acione o arquiteto", detalhe: "A spec foi aprovada (G1), mas o design ainda não foi feito e nada está rodando.", acao: "acionar", ...passo };
+  const feitas = i.tarefas.filter((t) => t.status === "aprovado").length;
+  return {
+    tipo: "voce",
+    titulo: "Parada: acione o orquestrador para continuar",
+    detalhe: i.ultima
+      ? `O ${i.ultima.agente} terminou a execução, mas o G3 ainda não está pronto${i.tarefas.length ? ` (${feitas} de ${i.tarefas.length} tarefas aprovadas)` : ""}. Cada execução tem limite de turnos; acione de novo para seguir.`
+      : "Spec e design aprovados. Nada está rodando: acione o orquestrador para implementar.",
+    acao: "acionar",
+    ...passo,
+  };
+}
+
+/** Texto do comentário de execução sem o cabeçalho técnico: o que o agente disse ao Operador. */
+export function resumoExecucao(body: string): string {
+  return body
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .split("\n")
+    .filter((l) => !/^#{1,6}\s/.test(l) && !/^\*\*Acionado por/.test(l))
+    .map((l) => l.replace(/^>\s?/, ""))
+    .join("\n")
+    .trim();
+}

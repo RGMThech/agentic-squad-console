@@ -7,12 +7,13 @@ import { Markdown } from "@/components/Markdown";
 import { PageHead } from "@/components/Shell";
 import { DocBadge, GateTrack, RunIcon } from "@/components/Status";
 import { DoubtsPanel } from "@/components/DoubtsPanel";
+import { SituacaoCard } from "@/components/Situacao";
 import { approveG3, approveGate, requestChanges, runAgent } from "@/lib/actions";
 import { AGENTES_PADRAO, RE_FEATURE, can, nextStep, parseDoubts } from "@/lib/core";
 import { ago, money, runDuration, when } from "@/lib/format";
 import { listDir } from "@/lib/github";
 import { getPRs, getSquad } from "@/lib/page";
-import { isRunning, listFeatureIds, listRuns, loadFeature, prChecks, type Doc, type Run } from "@/lib/squad";
+import { isRunning, listFeatureIds, listRuns, loadFeature, prChecks, situacaoDaFeature, ultimaExecucao, type Doc, type Run } from "@/lib/squad";
 
 const ABAS = [
   { k: "spec", t: "Spec" },
@@ -75,7 +76,10 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
 
   const f = await loadFeature(ctx, feature, entry.branch, prs);
   const checks = f.pr && f.pr.state === "open" ? await prChecks(ctx, f.pr.headSha) : null;
-  const sugestao = nextStep(f.gates, feature);
+  const sit = situacaoDaFeature(f, runs);
+  const ultima = ultimaExecucao(f, runs);
+  const passo = nextStep(f.gates, feature);
+  const sugestao = sit.acao === "acionar" && sit.agente ? { agente: sit.agente, instrucao: sit.instrucao ?? passo.instrucao } : passo;
   const operador = can(ctx.role, "aprovar");
   const duvidas = f.spec ? parseDoubts(f.spec.body) : { abertas: [], resolvidas: [] };
   const hidden = (
@@ -88,7 +92,7 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
 
   return (
     <>
-      <AutoRefresh active={running.length > 0} />
+      <AutoRefresh active={f.gates.g3 !== "aprovado"} seconds={running.length > 0 ? 10 : 45} />
       <PageHead
         title={f.titulo}
         crumbs={[{ href: b, label: ctx.config.nome || repo }, { label: feature }]}
@@ -108,11 +112,14 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
       <div className="content">
         <div className="split">
           <div className="stack">
+            <SituacaoCard s={sit} rodando={running[0] ?? null} ultima={ultima} podeAgir={can(ctx.role, "acionar")} />
+
             <div className="card card-pad">
               <GateTrack gates={f.gates} running={running.length > 0} />
             </div>
 
             {f.spec && f.gates.g1 !== "aprovado" && duvidas.abertas.length > 0 && (
+              <div id="duvidas">
               <DoubtsPanel
                 owner={owner}
                 repo={repo}
@@ -123,6 +130,7 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
                 analistaRodando={running.length > 0}
                 versao={f.spec.data.versao}
               />
+              </div>
             )}
 
             <div className="card">
@@ -178,15 +186,9 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
           </div>
 
           <aside className="stack">
-            {running.length > 0 && (
-              <div className="alert alert-info">
-                <b>{running.map((r) => r.agente).join(", ")}</b> trabalhando agora. A página atualiza sozinha.
-              </div>
-            )}
-
             {/* ---------------- G1 ---------------- */}
             {f.gates.g1 === "aguardando" && (
-              <div className="card card-pad stack-sm">
+              <div className="card card-pad stack-sm" id="decisao">
                 <span className="badge badge-amber" style={{ alignSelf: "flex-start" }}>G1 · Spec</span>
                 {f.doubts.length > 0 ? (
                   <>
@@ -199,6 +201,8 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
                           : "Aguardando o operador responder."}
                     </p>
                   </>
+                ) : running.length > 0 ? (
+                  <EsperaAgente agente={running[0].agente} />
                 ) : operador ? (
                   <GateActions gate="G1" hidden={hidden} proximo="arquiteto-dados" />
                 ) : (
@@ -209,9 +213,11 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
 
             {/* ---------------- G2 ---------------- */}
             {f.gates.g2 === "aguardando" && (
-              <div className="card card-pad stack-sm">
+              <div className="card card-pad stack-sm" id="decisao">
                 <span className="badge badge-amber" style={{ alignSelf: "flex-start" }}>G2 · Design</span>
-                {operador ? (
+                {running.length > 0 ? (
+                  <EsperaAgente agente={running[0].agente} />
+                ) : operador ? (
                   <GateActions gate="G2" hidden={hidden} proximo="orquestrador" />
                 ) : (
                   <p className="small muted">Design pronto. Aguardando aprovação do operador.</p>
@@ -221,14 +227,16 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
 
             {/* ---------------- G3 ---------------- */}
             {f.gates.g3 === "aguardando" && (
-              <div className="card card-pad stack-sm">
+              <div className="card card-pad stack-sm" id="decisao">
                 <span className="badge badge-amber" style={{ alignSelf: "flex-start" }}>G3 · Produção</span>
                 <h3>Pronto para produção</h3>
                 <div className="row small">
                   QA <DocBadge value={f.qa?.data.veredito} /> Revisor <DocBadge value={f.review?.data.veredito} />
                 </div>
                 {checks && <ChecksSummary checks={checks} />}
-                {operador ? (
+                {running.length > 0 ? (
+                  <EsperaAgente agente={running[0].agente} />
+                ) : operador ? (
                   <>
                     <ActionForm
                       action={approveG3}
@@ -260,8 +268,9 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
 
             {/* ---------------- acionar agente ---------------- */}
             {can(ctx.role, "acionar") && f.gates.g3 !== "aprovado" && (
-              <div className="card card-pad stack-sm">
+              <div className="card card-pad stack-sm" id="acionar">
                 <h3>Acionar um agente</h3>
+                {running.length > 0 && <p className="xs muted">Já há uma execução em andamento. Uma nova entra na fila e roda quando ela terminar.</p>}
                 <ActionForm action={runAgent} submit="Acionar" pending="Acionando…" variant="primary" resetOnOk={false}>
                   {hidden}
                   <div className="field">
@@ -323,6 +332,10 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
       </div>
     </>
   );
+}
+
+function EsperaAgente({ agente }: { agente: string }) {
+  return <p className="small muted">O {agente} está trabalhando nesta feature. A aprovação fica disponível quando ele terminar.</p>;
 }
 
 function GateActions({ gate, hidden, proximo }: { gate: "G1" | "G2"; hidden: React.ReactNode; proximo: string }) {

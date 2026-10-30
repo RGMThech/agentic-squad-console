@@ -9,6 +9,10 @@ import {
   parseFrontmatter,
   parseMembers,
   parseRunRecords,
+  resumoExecucao,
+  parseDoubts,
+  situacao,
+  type Situacao,
   parseRunTitle,
   parseTasks,
   resolveRole,
@@ -99,6 +103,8 @@ export type Run = {
   createdAt: string;
   updatedAt: string;
   record: RunRecord | null;
+  /** O que o agente disse ao terminar (comentário da execução no PR). */
+  resumo: string;
 };
 
 // ---------------- squads ----------------
@@ -295,6 +301,7 @@ export async function listRuns(ctx: SquadContext, prs: PR[], limit = 60): Promis
   }
 
   const records = new Map<string, RunRecord>();
+  const resumos = new Map<string, string>();
   const recent = prs.slice().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 25);
   await Promise.all(
     recent.map(async (pr) => {
@@ -304,7 +311,11 @@ export async function listRuns(ctx: SquadContext, prs: PR[], limit = 60): Promis
         issue_number: pr.number,
         per_page: 100,
       });
-      for (const c of comments) for (const r of parseRunRecords(c.body ?? "")) records.set(r.run_id, r);
+      for (const c of comments) {
+        const regs = parseRunRecords(c.body ?? "");
+        for (const r of regs) records.set(r.run_id, r);
+        if (regs.length === 1) resumos.set(regs[0].run_id, resumoExecucao(c.body ?? ""));
+      }
     }),
   );
 
@@ -321,6 +332,7 @@ export async function listRuns(ctx: SquadContext, prs: PR[], limit = 60): Promis
       createdAt: r.created_at,
       updatedAt: r.updated_at,
       record: records.get(String(r.id)) ?? null,
+      resumo: resumos.get(String(r.id)) ?? "",
     };
   });
 }
@@ -361,4 +373,26 @@ export async function apiKeyStatus(ctx: SquadContext): Promise<{ set: boolean; u
     if (status(e) === 404 || status(e) === 403) return { set: false, updatedAt: null };
     throw e;
   }
+}
+
+/** Estado da feature para a tela: em execução, precisa de você, falhou ou entregue. */
+export function situacaoDaFeature(f: Feature, runs: Run[]): Situacao {
+  const daFeature = runs.filter((r) => r.feature === f.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const ativa = daFeature.find(isRunning);
+  const ultima = daFeature.find((r) => !isRunning(r));
+  const duvidas = f.spec ? parseDoubts(f.spec.body).abertas : [];
+  return situacao({
+    feature: f.id,
+    gates: f.gates,
+    duvidasTotal: duvidas.length,
+    duvidasSemResposta: duvidas.filter((d) => !d.resposta).length,
+    rodando: ativa ? { agente: ativa.agente, desde: ativa.createdAt, fila: ativa.status === "queued" } : null,
+    ultima: ultima ? { agente: ultima.agente, ok: ultima.conclusion === "success" && ultima.record?.status !== "falha", resumo: ultima.resumo } : null,
+    tarefas: f.tasks,
+  });
+}
+
+/** Última execução concluída da feature (para mostrar a mensagem do agente). */
+export function ultimaExecucao(f: { id: string }, runs: Run[]): Run | null {
+  return runs.filter((r) => r.feature === f.id && !isRunning(r)).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null;
 }

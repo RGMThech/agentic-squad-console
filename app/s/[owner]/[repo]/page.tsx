@@ -3,29 +3,13 @@ import { AutoRefresh } from "@/components/AutoRefresh";
 import { IconExternal, IconPlus } from "@/components/Icons";
 import { PageHead } from "@/components/Shell";
 import { GatesMini, RoleBadge, RunBadge } from "@/components/Status";
-import { can, parseDoubts } from "@/lib/core";
+import { can } from "@/lib/core";
+import { SituacaoBadge } from "@/components/Situacao";
 import { ago, money } from "@/lib/format";
 import { getPRs, getSquad, type SquadParams } from "@/lib/page";
-import { isRunning, listFeatures, listRuns, type Feature } from "@/lib/squad";
+import { isRunning, listFeatures, listRuns, situacaoDaFeature } from "@/lib/squad";
 
 export const metadata = { title: "Visão geral" };
-
-function proximaAcao(f: Feature): { texto: string; voce: boolean } {
-  const g = f.gates;
-  if (g.g3 === "aprovado") return { texto: "Entregue", voce: false };
-  if (g.g1 === "pendente") return { texto: "Analista escrevendo a spec", voce: false };
-  if (g.g1 === "aguardando") {
-    if (!f.doubts.length) return { texto: "Aprovar a spec (G1)", voce: true };
-    const semResposta = f.spec ? parseDoubts(f.spec.body).abertas.filter((d) => !d.resposta).length : f.doubts.length;
-    return semResposta
-      ? { texto: `Responder ${semResposta} dúvida(s) da spec`, voce: true }
-      : { texto: "Enviar respostas ao analista", voce: true };
-  }
-  if (g.g2 === "pendente") return { texto: "Arquiteto desenhando a solução", voce: false };
-  if (g.g2 === "aguardando") return { texto: "Aprovar o design (G2)", voce: true };
-  if (g.g3 === "aguardando") return { texto: "Aprovar produção (G3)", voce: true };
-  return { texto: "Squad implementando", voce: false };
-}
 
 export default async function Overview({ params }: { params: SquadParams }) {
   const { owner, repo } = await params;
@@ -35,7 +19,8 @@ export default async function Overview({ params }: { params: SquadParams }) {
   const b = `/s/${owner}/${repo}`;
 
   const ativas = features.filter((f) => f.gates.g3 !== "aprovado");
-  const aguardando = ativas.filter((f) => proximaAcao(f).voce);
+  const situacoes = new Map(features.map((f) => [f.id, situacaoDaFeature(f, runs)]));
+  const aguardando = ativas.filter((f) => ["voce", "erro"].includes(situacoes.get(f.id)!.tipo));
   const rodando = runs.filter(isRunning);
   const novas = rodando.filter((r, i, all) => !features.some((f) => f.id === r.feature) && all.findIndex((x) => x.feature === r.feature) === i);
   const mes = new Date().toISOString().slice(0, 7);
@@ -45,7 +30,7 @@ export default async function Overview({ params }: { params: SquadParams }) {
 
   return (
     <>
-      <AutoRefresh active={rodando.length > 0} />
+      <AutoRefresh active seconds={rodando.length > 0 ? 10 : 45} />
       <PageHead
         title={ctx.config.nome || repo}
         subtitle={
@@ -68,9 +53,9 @@ export default async function Overview({ params }: { params: SquadParams }) {
       <div className="content stack">
         <div className="grid grid-4">
           <div className={`card kpi ${aguardando.length && ctx.role === "operador" ? "attention" : ""}`}>
-            <div className="kpi-label">Aguardando o Operador</div>
+            <div className="kpi-label">Precisam de você</div>
             <div className="kpi-value">{aguardando.length}</div>
-            <div className="kpi-hint">gates prontos para decisão</div>
+            <div className="kpi-hint">{aguardando.length ? "features paradas esperando decisão ou ação" : "nada parado esperando você"}</div>
           </div>
           <div className="card kpi">
             <div className="kpi-label">Features ativas</div>
@@ -110,7 +95,7 @@ export default async function Overview({ params }: { params: SquadParams }) {
                   <tr>
                     <th>Feature</th>
                     <th>Gates</th>
-                    <th>Próximo passo</th>
+                    <th>Situação</th>
                     <th>Tarefas</th>
                     <th>Última execução</th>
                   </tr>
@@ -128,7 +113,9 @@ export default async function Overview({ params }: { params: SquadParams }) {
                         <GatesMini gates={{ g1: "pendente", g2: "nao_iniciado", g3: "nao_iniciado" }} />
                       </td>
                       <td>
-                        <span className="small muted">Preparando a feature</span>
+                        <span className="badge badge-blue">
+                          <span className="dot pulse" /> Analista escrevendo a spec
+                        </span>
                       </td>
                       <td>
                         <span className="xs muted">—</span>
@@ -139,7 +126,7 @@ export default async function Overview({ params }: { params: SquadParams }) {
                     </tr>
                   ))}
                   {features.map((f) => {
-                    const acao = proximaAcao(f);
+                    const sit = situacoes.get(f.id)!;
                     const feitas = f.tasks.filter((t) => t.status === "aprovado").length;
                     const ultima = ultimaPorFeature.get(f.id);
                     return (
@@ -154,13 +141,7 @@ export default async function Overview({ params }: { params: SquadParams }) {
                           <GatesMini gates={f.gates} />
                         </td>
                         <td>
-                          {acao.voce ? (
-                            <span className="badge badge-amber">
-                              <span className="dot" /> {acao.texto}
-                            </span>
-                          ) : (
-                            <span className="small muted">{acao.texto}</span>
-                          )}
+                          <SituacaoBadge s={sit} />
                         </td>
                         <td>
                           {f.tasks.length ? (
