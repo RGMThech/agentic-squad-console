@@ -40,7 +40,7 @@ export function DadosCard({ owner, repo, atual, plataformaSquad, dbtPedido, segr
   const valoresDe = (p: Plataforma) => ({
     conexao: Object.fromEntries(PLATAFORMAS[p].campos.map((c) => [c.k, atual?.plataforma === p ? atual.conexao[c.k] ?? "" : ""])),
     leitura: atual?.plataforma === p ? atual.leitura.join(", ") : "",
-    escrita: atual?.plataforma === p ? atual.escrita : "",
+    escrita: atual?.plataforma === p ? atual.escrita.join(", ") : "",
   });
   const [v, setV] = useState(valoresDe(plat));
   const [dbt, setDbt] = useState(atual?.dbt ?? dbtPedido);
@@ -98,7 +98,7 @@ export function DadosCard({ owner, repo, atual, plataformaSquad, dbtPedido, segr
               <span className="mono xs">{PLATAFORMAS[atual.plataforma].campos.map((c) => atual.conexao[c.k]).filter(Boolean).join(" · ") || "—"}</span>
             </div>
             <div><span className="muted">Leitura</span><span>{atual.leitura.length ? atual.leitura.join(", ") : "—"}</span></div>
-            <div><span className="muted">Sandbox</span><span>{atual.escrita || "—"}</span></div>
+            <div><span className="muted">Sandbox</span><span>{atual.escrita.length ? atual.escrita.join(", ") : "—"}</span></div>
             <div>
               <span className="muted">Credenciais</span>
               <span>{PLATAFORMAS[atual.plataforma].segredos.every((s) => segredos[s.nome]) ? "salvas no GitHub" : "ausentes"}{atual.dbt ? " · dbt ativo" : ""}</span>
@@ -152,8 +152,9 @@ export function DadosCard({ owner, repo, atual, plataformaSquad, dbtPedido, segr
                 <input id="dados-leitura" name="leitura" value={v.leitura} onChange={(e) => setV((x) => ({ ...x, leitura: e.target.value }))} className="input" placeholder={meta.leitura.placeholder} />
               </div>
               <div className="field">
-                <label htmlFor="dados-escrita">Escrita — sandbox (banco.schema)</label>
+                <label htmlFor="dados-escrita">Escrita — sandbox (um ou mais banco.schema)</label>
                 <input id="dados-escrita" name="escrita" value={v.escrita} onChange={(e) => setV((x) => ({ ...x, escrita: e.target.value }))} className="input" placeholder={meta.escrita} />
+                <span className="hint">Ex.: camadas separadas: dev.bronze, dev.silver, dev.gold. Nunca os schemas das fontes.</span>
               </div>
             </div>
 

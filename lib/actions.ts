@@ -389,7 +389,7 @@ export async function saveDados(_: DadosState, fd: FormData): Promise<DadosState
       plataforma,
       conexao: normalizeConexao(plataforma, Object.fromEntries(meta.campos.map((c) => [c.k, str(fd, `cx_${c.k}`, 300)]))),
       leitura: parseLeitura(str(fd, "leitura", 2000)),
-      escrita: str(fd, "escrita", 200).replace(/[`"[\]]/g, "").toLowerCase(),
+      escrita: parseLeitura(str(fd, "escrita", 1000)),
       dbt: fd.get("dbt") === "on",
     };
     const invalido = validateDados(cfg);

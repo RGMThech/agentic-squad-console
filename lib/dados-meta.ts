@@ -9,7 +9,8 @@ export type DadosConfig = {
   plataforma: Plataforma;
   conexao: Record<string, string>;
   leitura: string[];
-  escrita: string;
+  /** Schemas de sandbox (banco.schema): um ou vários, ex.: bronze, silver e gold de um catálogo de dev. */
+  escrita: string[];
   dbt: boolean;
 };
 
@@ -127,7 +128,7 @@ export function lerDados(d: Record<string, unknown>): DadosConfig | null {
       plataforma: x.plataforma,
       conexao: Object.fromEntries(Object.entries(cx && typeof cx === "object" ? cx : {}).map(([k, v]) => [k, String(v ?? "").trim()])),
       leitura: lista(x.leitura),
-      escrita: String(x.escrita ?? "").trim(),
+      escrita: lista(x.escrita),
       dbt: x.dbt === true || String(x.dbt).toLowerCase() === "true",
     };
   }
@@ -137,7 +138,7 @@ export function lerDados(d: Record<string, unknown>): DadosConfig | null {
       plataforma: "databricks",
       conexao: { host: String(l.host ?? "").trim(), warehouse_id: String(l.warehouse_id ?? "").trim() },
       leitura: lista(l.leitura),
-      escrita: String(l.escrita ?? "").trim(),
+      escrita: lista(l.escrita),
       dbt: x?.dbt === true,
     };
   }

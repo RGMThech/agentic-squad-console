@@ -106,10 +106,12 @@ export function validateDados(c: DadosConfig): string | null {
     const p = l.split(".");
     if (p.length > 2 || !p.every((x) => ident.test(x))) return `Leitura inválida: "${l}". Use banco ou banco.schema.`;
   }
-  if (c.escrita) {
-    const p = c.escrita.split(".");
-    if (p.length !== 2 || !p.every((x) => ident.test(x))) return `Escrita (sandbox) deve ser exatamente banco.schema, ex.: ${EXEMPLO_SANDBOX[c.plataforma]}.`;
+  for (const e of c.escrita) {
+    const p = e.split(".");
+    if (p.length !== 2 || !p.every((x) => ident.test(x))) return `Escrita (sandbox) inválida: "${e}". Cada item deve ser banco.schema, ex.: ${EXEMPLO_SANDBOX[c.plataforma]}.`;
   }
+  const comum = c.escrita.find((e) => c.leitura.includes(e));
+  if (comum) return `${comum} aparece em Leitura e em Escrita. Use para a sandbox um schema separado das fontes, para que os dados de origem fiquem somente leitura.`;
   return null;
 }
 
@@ -265,18 +267,18 @@ async function testarDatabricks(c: DadosConfig, s: Segredos, f: Fetch): Promise<
           }
         },
       })),
-      ...(c.escrita ? [{
-        titulo: `Sandbox ${c.escrita}`,
+      ...c.escrita.map((esc) => ({
+        titulo: `Sandbox ${esc}`,
         fn: async () => {
-          const [cat, sch] = c.escrita.split(".");
+          const [cat, sch] = esc.split(".");
           try {
             await sql(`SHOW TABLES IN \`${cat}\`.\`${sch}\``);
             return "Schema acessível. A permissão de criar tabelas é conferida na primeira escrita dos agentes.";
           } catch (e) {
-            throw new Error(semPermissao((e as Error).message, c.escrita, "Conceda USE SCHEMA, CREATE TABLE, MODIFY e SELECT na sandbox."));
+            throw new Error(semPermissao((e as Error).message, esc, "Conceda USE SCHEMA, CREATE TABLE, MODIFY e SELECT na sandbox."));
           }
         },
-      }] : []),
+      })),
     ],
   );
 }
@@ -345,17 +347,17 @@ async function testarSnowflake(c: DadosConfig, s: Segredos, f: Fetch): Promise<C
           }
         },
       })),
-      ...(c.escrita ? [{
-        titulo: `Sandbox ${c.escrita}`,
+      ...c.escrita.map((esc) => ({
+        titulo: `Sandbox ${esc}`,
         fn: async () => {
           try {
-            await sql(`SHOW TABLES IN SCHEMA ${c.escrita}`);
+            await sql(`SHOW TABLES IN SCHEMA ${esc}`);
             return "Schema acessível. A permissão de criar tabelas é conferida na primeira escrita dos agentes.";
           } catch (e) {
-            throw new Error(semPermissao((e as Error).message, c.escrita, "Conceda USAGE, CREATE TABLE e CREATE VIEW no schema da sandbox."));
+            throw new Error(semPermissao((e as Error).message, esc, "Conceda USAGE, CREATE TABLE e CREATE VIEW no schema da sandbox."));
           }
         },
-      }] : []),
+      })),
     ],
   );
 }
@@ -428,18 +430,18 @@ async function testarBigQuery(c: DadosConfig, s: Segredos, f: Fetch): Promise<Ch
           }
         },
       })),
-      ...(c.escrita ? [{
-        titulo: `Sandbox ${c.escrita}`,
+      ...c.escrita.map((esc) => ({
+        titulo: `Sandbox ${esc}`,
         fn: async () => {
-          const [p, ds] = c.escrita.split(".");
+          const [p, ds] = esc.split(".");
           try {
             await get(`/projects/${enc(p)}/datasets/${enc(ds)}/tables?maxResults=1`);
             return "Dataset acessível. A permissão de criar tabelas (Data Editor) é conferida na primeira escrita dos agentes.";
           } catch (e) {
-            throw new Error(semPermissao((e as Error).message, c.escrita, "Crie o dataset e dê BigQuery Data Editor à service account nele."));
+            throw new Error(semPermissao((e as Error).message, esc, "Crie o dataset e dê BigQuery Data Editor à service account nele."));
           }
         },
-      }] : []),
+      })),
     ],
   );
 }
@@ -486,8 +488,14 @@ async function testarFabric(c: DadosConfig, s: Segredos, f: Fetch): Promise<Chec
     const [db, sch] = l.split(".");
     return `SELECT TOP 20 TABLE_SCHEMA, TABLE_NAME FROM ${q(db)}.INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA NOT IN ('sys','INFORMATION_SCHEMA','queryinsights')${sch ? ` AND TABLE_SCHEMA = '${sch.replace(/'/g, "''")}'` : ""}`;
   });
-  const [sdb, ssch] = c.escrita ? c.escrita.split(".") : ["", ""];
-  const sqls = ["SELECT SUSER_SNAME(), DB_NAME()", ...itens, ...(c.escrita ? [`SELECT name FROM ${q(sdb)}.sys.schemas WHERE name = '${ssch.replace(/'/g, "''")}'`] : [])];
+  const sqls = [
+    "SELECT SUSER_SNAME(), DB_NAME()",
+    ...itens,
+    ...c.escrita.map((e) => {
+      const [sdb, ssch] = e.split(".");
+      return `SELECT name FROM ${q(sdb)}.sys.schemas WHERE name = '${ssch.replace(/'/g, "''")}'`;
+    }),
+  ];
   const res = (i: number) => {
     const r = resultados[i];
     if (r instanceof Error) throw r;
@@ -547,17 +555,18 @@ async function testarFabric(c: DadosConfig, s: Segredos, f: Fetch): Promise<Chec
           }
         },
       })),
-      ...(c.escrita ? [{
-        titulo: `Sandbox ${c.escrita}`,
+      ...c.escrita.map((esc, k) => ({
+        titulo: `Sandbox ${esc}`,
         fn: async () => {
+          const [sdb, ssch] = esc.split(".");
           try {
-            if (res(1 + itens.length).length === 0) throw new Error(`O schema ${ssch} não existe no warehouse ${sdb}: rode CREATE SCHEMA ${ssch}; nele.`);
+            if (res(1 + itens.length + k).length === 0) throw new Error(`O schema ${ssch} não existe no warehouse ${sdb}: rode CREATE SCHEMA ${ssch}; nele.`);
             return "Schema acessível. A permissão de criar tabelas é conferida na primeira escrita dos agentes.";
           } catch (e) {
-            throw new Error(semPermissao((e as Error).message, c.escrita, "Dê ao aplicativo o papel Contributor no workspace da squad."));
+            throw new Error(semPermissao((e as Error).message, esc, "Dê ao aplicativo o papel Contributor no workspace da squad."));
           }
         },
-      }] : []),
+      })),
     ],
   );
 }
@@ -586,7 +595,7 @@ export async function testConnection(c: DadosConfig, s: Segredos, f: Fetch = fet
 export function setDadosYaml(text: string, c: DadosConfig, YAML: typeof import("yaml")): string {
   const doc = YAML.parseDocument(text || "");
   if (!doc.contents) doc.contents = doc.createNode({}) as never;
-  const valores: Record<string, unknown> = { plataforma: c.plataforma, conexao: c.conexao, leitura: c.leitura, escrita: c.escrita, dbt: c.dbt };
+  const valores: Record<string, unknown> = { plataforma: c.plataforma, conexao: c.conexao, leitura: c.leitura, escrita: c.escrita.length === 1 ? c.escrita[0] : c.escrita.length ? c.escrita : "", dbt: c.dbt };
   const node = doc.get("dados");
   if (node && YAML.isMap(node)) {
     for (const [k, v] of Object.entries(valores)) node.set(k, doc.createNode(v));

@@ -22,19 +22,22 @@ test("normaliza conexões de cada plataforma", () => {
 });
 
 test("valida campos por plataforma", () => {
-  const base = { leitura: ["vendas"], escrita: "squad_dev.agentes", dbt: false };
+  const base = { leitura: ["vendas"], escrita: ["squad_dev.agentes"], dbt: false };
   assert.equal(validateDados({ ...base, plataforma: "databricks", conexao: { host: "https://x.cloud.databricks.com", warehouse_id: "a1b2c3d4e5f6" } }), null);
   assert.match(validateDados({ ...base, plataforma: "databricks", conexao: { host: "https://x", warehouse_id: "/sql/warehouses/abc" } }) ?? "", /Warehouse ID/);
   assert.equal(validateDados({ ...base, plataforma: "snowflake", conexao: { conta: "org-conta", usuario: "SQUAD_SVC", warehouse: "WH" } }), null);
   assert.match(validateDados({ ...base, plataforma: "snowflake", conexao: { conta: "org-conta", usuario: "a b", warehouse: "WH" } }) ?? "", /Usuário/);
-  assert.equal(validateDados({ ...base, plataforma: "bigquery", leitura: ["meu-proj.vendas"], escrita: "meu-proj.sandbox", conexao: { projeto: "meu-proj" } }), null);
+  assert.equal(validateDados({ ...base, plataforma: "bigquery", leitura: ["meu-proj.vendas"], escrita: ["meu-proj.sandbox"], conexao: { projeto: "meu-proj" } }), null);
   assert.match(validateDados({ ...base, plataforma: "bigquery", conexao: { projeto: "Meu Projeto" } }) ?? "", /ID do projeto/);
   assert.match(validateDados({ ...base, plataforma: "bigquery", conexao: { projeto: "meu-proj", max_gb: "-1" } }) ?? "", /GB/);
   const fab = { servidor: "abc.datawarehouse.fabric.microsoft.com", banco: "squad_dev", tenant_id: "11111111-2222-3333-4444-555555555555" };
   assert.equal(validateDados({ ...base, plataforma: "fabric", conexao: fab }), null);
   assert.match(validateDados({ ...base, plataforma: "fabric", conexao: { ...fab, tenant_id: "x" } }) ?? "", /Tenant/);
   assert.match(validateDados({ ...base, plataforma: "fabric", conexao: { ...fab, servidor: "evil.com" } }) ?? "", /connection string/);
-  assert.match(validateDados({ ...base, plataforma: "databricks", escrita: "squad_dev", conexao: { host: "https://x", warehouse_id: "a1b2c3d4e5f6" } }) ?? "", /banco.schema/);
+  assert.match(validateDados({ ...base, plataforma: "databricks", escrita: ["squad_dev"], conexao: { host: "https://x", warehouse_id: "a1b2c3d4e5f6" } }) ?? "", /banco.schema/);
+  const dbx = { host: "https://x.cloud.databricks.com", warehouse_id: "a1b2c3d4e5f6" };
+  assert.equal(validateDados({ ...base, plataforma: "databricks", leitura: ["e.eleicoes"], escrita: ["e.bronze", "e.silver", "e.gold"], conexao: dbx }), null);
+  assert.match(validateDados({ ...base, plataforma: "databricks", leitura: ["e.eleicoes"], escrita: ["e.eleicoes"], conexao: dbx }) ?? "", /separado das fontes/);
 });
 
 test("valida o formato dos segredos antes de chamar a plataforma", () => {
@@ -60,7 +63,7 @@ test("JWT do Snowflake: assinatura e fingerprint da chave pública", () => {
 
 test("squad.yaml: grava o bloco dados, preserva comentários e aposenta o bloco databricks", () => {
   const original = "# Configuração\nnome: X   # nome\nplataforma: agnostico\nmodelo: sonnet\ndatabricks:\n  host: https://velho\n  warehouse_id: w\n";
-  const out = setDadosYaml(original, { plataforma: "snowflake", conexao: { conta: "org-c", usuario: "U", warehouse: "W" }, leitura: ["vendas"], escrita: "squad_dev.agentes", dbt: true }, YAML);
+  const out = setDadosYaml(original, { plataforma: "snowflake", conexao: { conta: "org-c", usuario: "U", warehouse: "W" }, leitura: ["vendas"], escrita: ["squad_dev.agentes"], dbt: true }, YAML);
   const d = YAML.parse(out);
   assert.equal(d.dados.plataforma, "snowflake");
   assert.equal(d.dados.conexao.conta, "org-c");
@@ -69,17 +72,21 @@ test("squad.yaml: grava o bloco dados, preserva comentários e aposenta o bloco 
   assert.equal(d.databricks, undefined);
   assert.ok(out.includes("# Configuração") && out.includes("# nome"));
   const tpl = "dados:\n  plataforma: ''   # comentário\n  conexao: {}\n  dbt: false\n";
-  const out2 = setDadosYaml(tpl, { plataforma: "bigquery", conexao: { projeto: "p-123" }, leitura: [], escrita: "", dbt: false }, YAML);
+  const out2 = setDadosYaml(tpl, { plataforma: "bigquery", conexao: { projeto: "p-123" }, leitura: [], escrita: [], dbt: false }, YAML);
   assert.equal(YAML.parse(out2).dados.conexao.projeto, "p-123");
+  const out3 = setDadosYaml("", { plataforma: "databricks", conexao: { host: "https://h", warehouse_id: "w" }, leitura: ["e.eleicoes"], escrita: ["e.bronze", "e.silver", "e.gold"], dbt: false }, YAML);
+  assert.deepEqual(YAML.parse(out3).dados.escrita, ["e.bronze", "e.silver", "e.gold"]);
+  assert.deepEqual(lerDados(YAML.parse(out3))?.escrita, ["e.bronze", "e.silver", "e.gold"]);
+  assert.deepEqual(lerDados(YAML.parse(out))?.escrita, ["squad_dev.agentes"]);
 });
 
 test("lê o bloco dados e o bloco databricks das squads antigas", () => {
   assert.equal(lerDados({}), null);
   assert.equal(lerDados({ dados: { plataforma: "" } }), null);
-  const antigo = lerDados({ databricks: { host: "https://h", warehouse_id: "w", leitura: ["vendas"], escrita: "a.b" } });
+  const antigo = lerDados({ databricks: { host: "https://h", warehouse_id: "w", leitura: ["vendas"], escrita: ["a.b"] } });
   assert.equal(antigo?.plataforma, "databricks");
   assert.equal(antigo?.conexao.host, "https://h");
-  const novo = lerDados({ dados: { plataforma: "fabric", conexao: { servidor: "s", banco: "b", tenant_id: "t" }, leitura: "x, y", escrita: "b.agentes", dbt: true } });
+  const novo = lerDados({ dados: { plataforma: "fabric", conexao: { servidor: "s", banco: "b", tenant_id: "t" }, leitura: "x, y", escrita: ["b.agentes"], dbt: true } });
   assert.deepEqual(novo?.leitura, ["x", "y"]);
   assert.equal(novo?.dbt, true);
   assert.equal(TODOS_SEGREDOS.length, 6);
@@ -112,7 +119,7 @@ test("Snowflake: login, warehouse, leitura e sandbox", async () => {
     },
   });
   const checks = await testConnection(
-    { plataforma: "snowflake", conexao: { conta: "org-c", usuario: "SQUAD_SVC", warehouse: "SQUAD_WH", papel: "SQUAD_ROLE" }, leitura: ["vendas.silver", "FINANCEIRO"], escrita: "squad_dev.agentes", dbt: false },
+    { plataforma: "snowflake", conexao: { conta: "org-c", usuario: "SQUAD_SVC", warehouse: "SQUAD_WH", papel: "SQUAD_ROLE" }, leitura: ["vendas.silver", "FINANCEIRO"], escrita: ["squad_dev.agentes"], dbt: false },
     { SNOWFLAKE_PRIVATE_KEY: PEM },
     f,
   );
@@ -123,7 +130,7 @@ test("Snowflake: login, warehouse, leitura e sandbox", async () => {
 
 test("Snowflake: chave errada é explicada", async () => {
   const { f } = fakeFetch({ "/api/v2/statements": () => [401, { message: "JWT token is invalid." }] });
-  const checks = await testConnection({ plataforma: "snowflake", conexao: { conta: "o-c", usuario: "U", warehouse: "W" }, leitura: [], escrita: "", dbt: false }, { SNOWFLAKE_PRIVATE_KEY: PEM }, f);
+  const checks = await testConnection({ plataforma: "snowflake", conexao: { conta: "o-c", usuario: "U", warehouse: "W" }, leitura: [], escrita: [], dbt: false }, { SNOWFLAKE_PRIVATE_KEY: PEM }, f);
   assert.equal(checks.at(-1)?.ok, false);
   assert.match(checks.at(-1)?.detalhe ?? "", /Chave recusada/);
 });
@@ -144,7 +151,7 @@ test("BigQuery: token da service account, consulta e datasets", async () => {
     "/datasets/sandbox/tables": () => [200, {}],
   });
   const checks = await testConnection(
-    { plataforma: "bigquery", conexao: { projeto: "meu-proj", local: "US" }, leitura: ["meu-proj.vendas", "meu-proj.rh"], escrita: "meu-proj.sandbox", dbt: false },
+    { plataforma: "bigquery", conexao: { projeto: "meu-proj", local: "US" }, leitura: ["meu-proj.vendas", "meu-proj.rh"], escrita: ["meu-proj.sandbox"], dbt: false },
     { GCP_SA_KEY: sa },
     f,
   );
@@ -158,7 +165,7 @@ test("Fabric: secret inválido para no Entra ID, sem tentar o SQL", async () => 
   process.env.DADOS_TESTE_URL_BASE = "http://login";
   const { f } = fakeFetch({ "/oauth2/v2.0/token": () => [401, { error: "invalid_client", error_description: "AADSTS7000215: Invalid client secret provided." }] });
   const checks = await testConnection(
-    { plataforma: "fabric", conexao: { servidor: "abc.datawarehouse.fabric.microsoft.com", banco: "squad_dev", tenant_id: "t" }, leitura: ["fontes"], escrita: "squad_dev.agentes", dbt: false },
+    { plataforma: "fabric", conexao: { servidor: "abc.datawarehouse.fabric.microsoft.com", banco: "squad_dev", tenant_id: "t" }, leitura: ["fontes"], escrita: ["squad_dev.agentes"], dbt: false },
     { FABRIC_CLIENT_ID: "11111111-2222-3333-4444-555555555555", FABRIC_CLIENT_SECRET: "x" },
     f,
   );
@@ -175,7 +182,7 @@ test("Databricks continua igual", async () => {
     },
   });
   const checks = await testConnection(
-    { plataforma: "databricks", conexao: { host: "https://x", warehouse_id: "w1234567" }, leitura: ["vendas"], escrita: "squad_dev.agentes", dbt: false },
+    { plataforma: "databricks", conexao: { host: "https://x", warehouse_id: "w1234567" }, leitura: ["vendas"], escrita: ["squad_dev.agentes"], dbt: false },
     { DATABRICKS_CLIENT_ID: "a", DATABRICKS_CLIENT_SECRET: "b" },
     f,
   );
