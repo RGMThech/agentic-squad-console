@@ -39,7 +39,7 @@ export const PLATAFORMAS: Record<Plataforma, MetaPlataforma> = {
       { nome: "DATABRICKS_CLIENT_SECRET", label: "Client secret", placeholder: "secret do service principal", hint: "Gerado na aba Secrets do service principal." },
     ],
     leitura: { label: "Leitura (catálogos ou catalogo.schema)", placeholder: "vendas.silver, crm" },
-    escrita: "squad_dev.agentes",
+    escrita: "dev_vendas  (catálogo inteiro)",
     dbt: "dbt-databricks",
   },
   snowflake: {
@@ -62,7 +62,7 @@ export const PLATAFORMAS: Record<Plataforma, MetaPlataforma> = {
       },
     ],
     leitura: { label: "Leitura (databases ou database.schema)", placeholder: "vendas.silver, crm" },
-    escrita: "squad_dev.agentes",
+    escrita: "SQUAD_DEV  (database inteiro)",
     dbt: "dbt-snowflake",
   },
   bigquery: {
@@ -84,7 +84,7 @@ export const PLATAFORMAS: Record<Plataforma, MetaPlataforma> = {
       },
     ],
     leitura: { label: "Leitura (projetos ou projeto.dataset)", placeholder: "meu-projeto.vendas, meu-projeto.crm" },
-    escrita: "meu-projeto.squad_agentes",
+    escrita: "meu-projeto-dev  (projeto inteiro)",
     dbt: "dbt-bigquery",
   },
   fabric: {
@@ -101,7 +101,7 @@ export const PLATAFORMAS: Record<Plataforma, MetaPlataforma> = {
       { nome: "FABRIC_CLIENT_SECRET", label: "Client secret", placeholder: "Value do client secret", hint: "Certificates & secrets → New client secret." },
     ],
     leitura: { label: "Leitura (warehouses/lakehouses ou item.schema)", placeholder: "fontes, fontes.dbo" },
-    escrita: "squad_dev.agentes",
+    escrita: "squad_dev  (warehouse inteiro)",
     dbt: "dbt-fabric",
   },
 };

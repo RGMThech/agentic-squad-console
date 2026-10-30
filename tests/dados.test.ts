@@ -34,10 +34,13 @@ test("valida campos por plataforma", () => {
   assert.equal(validateDados({ ...base, plataforma: "fabric", conexao: fab }), null);
   assert.match(validateDados({ ...base, plataforma: "fabric", conexao: { ...fab, tenant_id: "x" } }) ?? "", /Tenant/);
   assert.match(validateDados({ ...base, plataforma: "fabric", conexao: { ...fab, servidor: "evil.com" } }) ?? "", /connection string/);
-  assert.match(validateDados({ ...base, plataforma: "databricks", escrita: ["squad_dev"], conexao: { host: "https://x", warehouse_id: "a1b2c3d4e5f6" } }) ?? "", /banco.schema/);
+  assert.match(validateDados({ ...base, plataforma: "databricks", escrita: ["a.b.c"], conexao: { host: "https://x", warehouse_id: "a1b2c3d4e5f6" } }) ?? "", /banco inteiro/);
   const dbx = { host: "https://x.cloud.databricks.com", warehouse_id: "a1b2c3d4e5f6" };
   assert.equal(validateDados({ ...base, plataforma: "databricks", leitura: ["e.eleicoes"], escrita: ["e.bronze", "e.silver", "e.gold"], conexao: dbx }), null);
-  assert.match(validateDados({ ...base, plataforma: "databricks", leitura: ["e.eleicoes"], escrita: ["e.eleicoes"], conexao: dbx }) ?? "", /separado das fontes/);
+  assert.match(validateDados({ ...base, plataforma: "databricks", leitura: ["e.eleicoes"], escrita: ["e.eleicoes"], conexao: dbx }) ?? "", /Leitura e em Escrita/);
+  // catálogo inteiro como área de trabalho, com a fonte dentro dele: permitido (a fonte fica protegida)
+  assert.equal(validateDados({ ...base, plataforma: "databricks", leitura: ["eleicoes2024.eleicoes"], escrita: ["eleicoes2024"], conexao: dbx }), null);
+  assert.match(validateDados({ ...base, plataforma: "databricks", leitura: ["eleicoes2024"], escrita: ["eleicoes2024"], conexao: dbx }) ?? "", /Leitura e em Escrita/);
 });
 
 test("valida o formato dos segredos antes de chamar a plataforma", () => {
@@ -171,6 +174,26 @@ test("Fabric: secret inválido para no Entra ID, sem tentar o SQL", async () => 
   );
   assert.equal(checks.length, 1);
   assert.match(checks[0].detalhe, /Client secret inválido/);
+});
+
+test("Databricks: catálogo inteiro como área de trabalho", async () => {
+  const stmts: string[] = [];
+  const { f } = fakeFetch({
+    "/oidc/v1/token": () => [200, { access_token: "t" }],
+    "/api/2.0/sql/statements/": (_u, init) => {
+      const st = JSON.parse(String(init.body)).statement as string;
+      stmts.push(st);
+      return [200, { status: { state: "SUCCEEDED" }, result: { data_array: [["sp"]] } }];
+    },
+  });
+  const checks = await testConnection(
+    { plataforma: "databricks", conexao: { host: "https://x", warehouse_id: "w1234567" }, leitura: ["eleicoes2024.eleicoes"], escrita: ["eleicoes2024"], dbt: false },
+    { DATABRICKS_CLIENT_ID: "a", DATABRICKS_CLIENT_SECRET: "b" },
+    f,
+  );
+  assert.ok(checks.every((c) => c.ok));
+  assert.match(checks.at(-1)!.detalhe, /criam os schemas/);
+  assert.ok(stmts.includes("SHOW SCHEMAS IN `eleicoes2024`"));
 });
 
 test("Databricks continua igual", async () => {

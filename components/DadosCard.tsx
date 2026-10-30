@@ -152,9 +152,9 @@ export function DadosCard({ owner, repo, atual, plataformaSquad, dbtPedido, segr
                 <input id="dados-leitura" name="leitura" value={v.leitura} onChange={(e) => setV((x) => ({ ...x, leitura: e.target.value }))} className="input" placeholder={meta.leitura.placeholder} />
               </div>
               <div className="field">
-                <label htmlFor="dados-escrita">Escrita — sandbox (um ou mais banco.schema)</label>
+                <label htmlFor="dados-escrita">Escrita — área de trabalho dos agentes</label>
                 <input id="dados-escrita" name="escrita" value={v.escrita} onChange={(e) => setV((x) => ({ ...x, escrita: e.target.value }))} className="input" placeholder={meta.escrita} />
-                <span className="hint">Ex.: camadas separadas: dev.bronze, dev.silver, dev.gold. Nunca os schemas das fontes.</span>
+                <span className="hint">Recomendado: o banco inteiro de desenvolvimento — os agentes criam sozinhos as camadas (bronze, silver, gold…). As fontes em Leitura continuam protegidas.</span>
               </div>
             </div>
 

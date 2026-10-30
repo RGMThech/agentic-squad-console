@@ -5,10 +5,10 @@ import { createPrivateKey, createPublicKey, createHash, randomUUID, sign } from 
 import type { DadosConfig, Plataforma } from "./dados-meta";
 
 const EXEMPLO_SANDBOX: Record<Plataforma, string> = {
-  databricks: "squad_dev.agentes",
-  snowflake: "squad_dev.agentes",
-  bigquery: "meu-projeto.squad_agentes",
-  fabric: "squad_dev.agentes",
+  databricks: "dev_vendas",
+  snowflake: "SQUAD_DEV",
+  bigquery: "meu-projeto-dev",
+  fabric: "squad_dev",
 };
 
 export type Check = { ok: boolean; titulo: string; detalhe: string };
@@ -108,10 +108,12 @@ export function validateDados(c: DadosConfig): string | null {
   }
   for (const e of c.escrita) {
     const p = e.split(".");
-    if (p.length !== 2 || !p.every((x) => ident.test(x))) return `Escrita (sandbox) inválida: "${e}". Cada item deve ser banco.schema, ex.: ${EXEMPLO_SANDBOX[c.plataforma]}.`;
+    if (p.length > 2 || !p.every((x) => ident.test(x)))
+      return `Escrita (sandbox) inválida: "${e}". Use um banco inteiro (os agentes criam as camadas) ou banco.schema, ex.: ${EXEMPLO_SANDBOX[c.plataforma]}.`;
   }
-  const comum = c.escrita.find((e) => c.leitura.includes(e));
-  if (comum) return `${comum} aparece em Leitura e em Escrita. Use para a sandbox um schema separado das fontes, para que os dados de origem fiquem somente leitura.`;
+  // fontes dentro do banco de escrita são permitidas (ficam protegidas); a mesma entrada nos dois lados, não
+  const comum = c.escrita.find((e) => c.leitura.includes(e) || c.leitura.includes(e.split(".")[0]));
+  if (comum) return `${comum} está em Leitura e em Escrita. As fontes precisam ficar somente leitura: em Leitura informe o schema das fontes (banco.schema) e em Escrita o banco de trabalho ou outro schema.`;
   return null;
 }
 
@@ -272,6 +274,10 @@ async function testarDatabricks(c: DadosConfig, s: Segredos, f: Fetch): Promise<
         fn: async () => {
           const [cat, sch] = esc.split(".");
           try {
+            if (!sch) {
+              await sql(`SHOW SCHEMAS IN \`${cat}\``);
+              return "Catálogo acessível. Os agentes criam os schemas de que precisarem (exige CREATE SCHEMA no catálogo).";
+            }
             await sql(`SHOW TABLES IN \`${cat}\`.\`${sch}\``);
             return "Schema acessível. A permissão de criar tabelas é conferida na primeira escrita dos agentes.";
           } catch (e) {
@@ -351,6 +357,10 @@ async function testarSnowflake(c: DadosConfig, s: Segredos, f: Fetch): Promise<C
         titulo: `Sandbox ${esc}`,
         fn: async () => {
           try {
+            if (!esc.includes(".")) {
+              await sql(`SHOW SCHEMAS IN DATABASE ${esc}`);
+              return "Database acessível. Os agentes criam os schemas de que precisarem (exige CREATE SCHEMA no database).";
+            }
             await sql(`SHOW TABLES IN SCHEMA ${esc}`);
             return "Schema acessível. A permissão de criar tabelas é conferida na primeira escrita dos agentes.";
           } catch (e) {
@@ -435,6 +445,10 @@ async function testarBigQuery(c: DadosConfig, s: Segredos, f: Fetch): Promise<Ch
         fn: async () => {
           const [p, ds] = esc.split(".");
           try {
+            if (!ds) {
+              await get(`/projects/${enc(p)}/datasets?maxResults=1`);
+              return "Projeto acessível. Os agentes criam os datasets de que precisarem (exige BigQuery User no projeto).";
+            }
             await get(`/projects/${enc(p)}/datasets/${enc(ds)}/tables?maxResults=1`);
             return "Dataset acessível. A permissão de criar tabelas (Data Editor) é conferida na primeira escrita dos agentes.";
           } catch (e) {
@@ -493,7 +507,7 @@ async function testarFabric(c: DadosConfig, s: Segredos, f: Fetch): Promise<Chec
     ...itens,
     ...c.escrita.map((e) => {
       const [sdb, ssch] = e.split(".");
-      return `SELECT name FROM ${q(sdb)}.sys.schemas WHERE name = '${ssch.replace(/'/g, "''")}'`;
+      return ssch ? `SELECT name FROM ${q(sdb)}.sys.schemas WHERE name = '${ssch.replace(/'/g, "''")}'` : `SELECT TOP 1 name FROM ${q(sdb)}.sys.schemas`;
     }),
   ];
   const res = (i: number) => {
@@ -561,6 +575,7 @@ async function testarFabric(c: DadosConfig, s: Segredos, f: Fetch): Promise<Chec
           const [sdb, ssch] = esc.split(".");
           try {
             if (res(1 + itens.length + k).length === 0) throw new Error(`O schema ${ssch} não existe no warehouse ${sdb}: rode CREATE SCHEMA ${ssch}; nele.`);
+            if (!ssch) return "Warehouse acessível. Os agentes criam os schemas de que precisarem (papel Contributor).";
             return "Schema acessível. A permissão de criar tabelas é conferida na primeira escrita dos agentes.";
           } catch (e) {
             throw new Error(semPermissao((e as Error).message, esc, "Dê ao aplicativo o papel Contributor no workspace da squad."));
