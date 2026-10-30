@@ -4,22 +4,46 @@ import { env } from "./env";
 
 type Mail = { to: string; subject: string; text: string; html: string };
 
+function transport() {
+  return import("nodemailer").then(({ default: nodemailer }) => {
+    const s = env.smtp;
+    return nodemailer.createTransport({
+      host: s.host,
+      port: s.port,
+      secure: s.secure,
+      auth: s.user ? { user: s.user, pass: s.pass } : undefined,
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+    });
+  });
+}
+
+function consoleAllowed() {
+  return !env.isProduction || process.env.ALLOW_MEMORY_DB === "1";
+}
+
+/** Confere a conexão e o login no servidor SMTP (usado pelo diagnóstico). */
+export async function verifyMail() {
+  if (env.mailTransport === "console") {
+    if (!consoleAllowed()) throw new Error("E-mail não configurado: defina SMTP_HOST, SMTP_USER e SMTP_PASS.");
+    return;
+  }
+  await (await transport()).verify();
+}
+
 async function send(m: Mail) {
   if (env.mailTransport === "console") {
-    if (env.isProduction && process.env.ALLOW_MEMORY_DB !== "1")
-      throw new Error("E-mail não configurado: defina SMTP_HOST, SMTP_USER e SMTP_PASS.");
+    if (!consoleAllowed()) throw new Error("E-mail não configurado: defina SMTP_HOST, SMTP_USER e SMTP_PASS.");
     console.log(`[e-mail para ${m.to}] ${m.subject}\n${m.text}`);
     return;
   }
-  const nodemailer = (await import("nodemailer")).default;
-  const s = env.smtp;
-  const transport = nodemailer.createTransport({
-    host: s.host,
-    port: s.port,
-    secure: s.secure,
-    auth: s.user ? { user: s.user, pass: s.pass } : undefined,
+  await (await transport()).sendMail({
+    from: `${BRAND.produto} · ${BRAND.empresa} <${env.mailFrom}>`,
+    to: m.to,
+    subject: m.subject,
+    text: m.text,
+    html: m.html,
   });
-  await transport.sendMail({ from: `${BRAND.produto} · ${BRAND.empresa} <${env.mailFrom}>`, to: m.to, subject: m.subject, text: m.text, html: m.html });
 }
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);

@@ -239,7 +239,8 @@ export function store(): Promise<Store> {
     } else if (url.startsWith("mysql://")) {
       g.__squadStore = mysqlStore(url).catch((e) => {
         g.__squadStore = undefined;
-        throw new Error(`Não foi possível conectar ao banco MySQL: ${(e as Error).message}`);
+        // preserva o código do erro (ECONNREFUSED, ER_ACCESS_DENIED_ERROR…) para o diagnóstico
+        throw e;
       });
     } else {
       throw new Error("DATABASE_URL deve começar com mysql:// (ex.: mysql://usuario:senha@host:3306/banco).");

@@ -54,8 +54,11 @@ export default function ErrorPage({ error, reset }: { error: Error & { digest?: 
     <div style={{ minHeight: "70vh", display: "grid", placeItems: "center", padding: 24 }}>
       <div className="card card-pad stack-sm" style={{ maxWidth: 520 }}>
         <h1>Algo deu errado</h1>
-        <p className="muted small">{error.message || "Erro inesperado ao falar com o GitHub."}</p>
+        <p className="muted small">{/omitted in production builds/i.test(error.message || "") ? "O servidor encontrou um erro ao montar esta página." : error.message || "Erro inesperado."}</p>
         {error.digest && <p className="xs muted mono">ref: {error.digest}</p>}
+        <p className="xs muted">
+          Administrador: abra <a href="/api/health?verificar=1" target="_blank" rel="noreferrer">/api/health?verificar=1</a> para ver qual configuração falhou (banco, e-mail ou GitHub).
+        </p>
         <div className="row">
           <button className="btn btn-primary" onClick={reset}>Tentar de novo</button>
           <a className="btn" href="/squads">Squads</a>
