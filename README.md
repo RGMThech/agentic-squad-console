@@ -10,7 +10,8 @@ Funciona junto com o template [`agentic-data-squad`](https://github.com/RGMThech
 |------|----------|
 | **Acesso** | Landing page pública. Login por e-mail com código de uso único. Contas só por convite. |
 | **Usuários** | Convidar, mudar papel (administrador ou usuário), desativar e encerrar sessões. Trilha de auditoria. |
-| **Squads** | Criar squad a partir do template na organização. Cada pessoa vê só as squads em que está na equipe. |
+| **Conexões** | Várias organizações do GitHub no mesmo console (a sua e as de clientes), pelo App do console ou por um App próprio do cliente, cada uma com o próprio template. |
+| **Squads** | Criar squad a partir do template, na organização escolhida. Cada pessoa vê só as squads em que está na equipe. |
 | **Equipe** | Operadores, membros e leitores por e-mail, gravados no `.squad/members.yaml` da squad. |
 | **Features e gates** | Abrir pedidos, acompanhar os agentes, aprovar G1 e G2, pedir ajustes, aprovar G3 (merge). |
 | **Custos** | Custo, turnos e duração por execução, por agente, por feature e por mês. |
@@ -23,7 +24,7 @@ Pessoa ──► landing ──► login (e-mail + código) ──► Squad Cons
                                                      │  contas, códigos e auditoria → MySQL
                                                      │  e-mails → SMTP
                                                      ▼
-                                     GitHub App "RGM Squad Console" (organização RGMThech)
+                                     GitHub App (instalado em cada organização conectada)
                                                      │
                                                      ▼
                                      repositório da squad ──► GitHub Actions (squad-agent)

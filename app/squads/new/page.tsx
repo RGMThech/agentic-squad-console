@@ -1,30 +1,60 @@
 import { ActionForm } from "@/components/ActionForm";
 import { PageHead } from "@/components/Shell";
 import { createSquad } from "@/lib/actions";
+import Link from "next/link";
 import { env } from "@/lib/env";
+import { listarConexoes } from "@/lib/github";
 import { requireAdmin } from "@/lib/session";
 
 export const metadata = { title: "Nova squad" };
 
 export default async function NewSquadPage() {
   await requireAdmin();
-  const org = env.githubOrg;
+  const conexoes = (await listarConexoes()).filter((c) => c.ativo);
+  if (!conexoes.length)
+    return (
+      <>
+        <PageHead title="Nova squad" crumbs={[{ href: "/squads", label: "Squads" }, { label: "Nova" }]} />
+        <div className="content">
+          <div className="card card-pad stack-sm">
+            <h2>Conecte uma organização do GitHub primeiro</h2>
+            <p className="muted">As squads ficam em repositórios de uma organização do GitHub. Conecte a sua ou a do cliente em Conexões.</p>
+            <Link href="/admin/conexoes" className="btn btn-primary" style={{ alignSelf: "flex-start" }}>
+              Abrir Conexões
+            </Link>
+          </div>
+        </div>
+      </>
+    );
 
   return (
     <>
       <PageHead
         title="Nova squad"
         crumbs={[{ href: "/squads", label: "Squads" }, { label: "Nova" }]}
-        subtitle={`Cria um repositório privado em ${org} a partir do template ${env.templateRepo}, com você como operador.`}
+        subtitle="Cria um repositório privado na organização escolhida, a partir do template dela, com você como operador."
       />
       <div className="content">
         <div className="split">
           <div className="card card-pad">
             <ActionForm action={createSquad} submit="Criar squad" pending="Criando repositório…">
               <div className="field">
+                <label htmlFor="owner">Organização do GitHub</label>
+                <select id="owner" name="owner" className="select" defaultValue={conexoes[0].owner}>
+                  {conexoes.map((c) => (
+                    <option key={c.owner} value={c.owner}>
+                      {c.owner} — template {c.template || env.templateRepo}
+                    </option>
+                  ))}
+                </select>
+                <span className="hint">
+                  Falta alguma? <Link href="/admin/conexoes">Conecte outra organização</Link>.
+                </span>
+              </div>
+              <div className="field">
                 <label htmlFor="nome">Nome do repositório</label>
                 <div className="input-prefix">
-                  <span>{org} /</span>
+                  <span>repo /</span>
                   <input id="nome" name="nome" className="input" required minLength={3} placeholder="squad-vendas-varejo" pattern="[A-Za-z0-9._-]+" />
                 </div>
                 <span className="hint">Letras minúsculas, números e hífen. Um prefixo como "squad-" ajuda a aplicar regras a todas as squads.</span>

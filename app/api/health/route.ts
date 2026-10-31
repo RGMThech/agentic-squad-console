@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { explainDbError, explainGithubError, explainMailError } from "@/lib/diagnose";
 import { store } from "@/lib/db";
 import { env } from "@/lib/env";
-import { appBotLogin, gh, missingPermissions } from "@/lib/github";
+import { listarConexoes } from "@/lib/github";
+import { diagnosticar, resumoDiagnostico } from "@/lib/conexoes";
 import { verifyMail } from "@/lib/mail";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +20,6 @@ const OBRIGATORIAS = [
   "ADMIN_EMAILS",
   "GITHUB_APP_ID",
   "GITHUB_APP_PRIVATE_KEY",
-  "GITHUB_ORG",
 ];
 
 /**
@@ -60,23 +60,13 @@ export async function GET(req: Request) {
   }
 
   try {
-    const o = await gh();
-    const bot = await appBotLogin();
-    let template = "";
-    try {
-      const [ow, rp] = env.templateRepo.split("/");
-      const t = (await o.repos.get({ owner: ow, repo: rp })).data;
-      template = t.is_template ? ` Template ${t.full_name} acessível.` : ` Atenção: ${t.full_name} ainda não está marcado como Template repository.`;
-    } catch {
-      template = ` Atenção: o App não acessa ${env.templateRepo} (confira SQUAD_TEMPLATE_REPO e a instalação em All repositories).`;
+    const conexoes = (await listarConexoes()).filter((c) => c.ativo);
+    if (!conexoes.length) {
+      r.github = { ok: false, detalhe: "Nenhuma organização do GitHub conectada. Conecte em Admin → Conexões (ou defina GITHUB_ORG)." };
+    } else {
+      const ds = await Promise.all(conexoes.map(async (c) => ({ c, d: await diagnosticar(c) })));
+      r.github = { ok: ds.every((x) => x.d.ok), detalhe: ds.map((x) => resumoDiagnostico(x.c, x.d)).join(" | ") };
     }
-    const perms = await missingPermissions();
-    const faltam = perms.faltando.length ? ` Permissões faltando na instalação: ${perms.faltando.join(", ")} (ajuste no App e aprove em Configure → Review request).` : " Permissões completas.";
-    const sel = perms.selecao === "all" ? "" : ` Atenção: instalado só em repositórios selecionados; escolha "All repositories".`;
-    r.github = {
-      ok: !perms.faltando.length && perms.selecao === "all" && !/Atenção/.test(template),
-      detalhe: `App autenticado e instalado em ${env.githubOrg} (bot ${bot}).${faltam}${sel}${template}`,
-    };
   } catch (e) {
     console.error("[health] github:", e);
     r.github = { ok: false, detalhe: explainGithubError(e) };

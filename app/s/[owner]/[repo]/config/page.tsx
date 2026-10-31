@@ -31,7 +31,7 @@ export default async function ConfigPage({ params, searchParams }: { params: Squ
     readFile(ctx.o, owner, repo, ".github/workflows/squad-agent.yml", ctx.defaultBranch),
     protecaoDaBranch(ctx.o, owner, repo, ctx.defaultBranch),
     store().then((s) => s.listUsers()),
-    appBotLogin(),
+    appBotLogin(owner),
     operador
       ? Promise.all(TODOS_SEGREDOS.map((n) => secretStatus(ctx, n).then((x) => [n, x.set] as const).catch(() => [n, false] as const))).then(Object.fromEntries)
       : Promise.resolve({} as Record<string, boolean>),

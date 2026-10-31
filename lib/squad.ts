@@ -2,7 +2,7 @@ import "server-only";
 import { dbtPedido, lerDados, type DadosConfig } from "./dados-meta";
 import YAML from "yaml";
 import { env } from "./env";
-import { gh, listDir, readFile, status, type GH } from "./github";
+import { conexaoDe, gh, listarConexoes, listDir, readFile, status, type GH } from "./github";
 import {
   computeGates,
   openDoubts,
@@ -112,10 +112,26 @@ export type Run = {
 
 // ---------------- squads ----------------
 
-export async function listSquads(user: User): Promise<SquadSummary[]> {
-  const o = await gh();
-  const repos = await o.paginate(o.apps.listReposAccessibleToInstallation, { per_page: 100 });
-  const squads = repos
+/** Squads de todas as organizações conectadas. Falhas de uma organização não escondem as demais. */
+export async function listSquads(user: User): Promise<{ squads: SquadSummary[]; falhas: { owner: string; erro: string }[] }> {
+  const conexoes = (await listarConexoes()).filter((c) => c.ativo);
+  const falhas: { owner: string; erro: string }[] = [];
+  const porOrg = await Promise.all(
+    conexoes.map(async (c) => {
+      try {
+        const o = await gh(c.owner);
+        const repos = await o.paginate(o.apps.listReposAccessibleToInstallation, { per_page: 100 });
+        return repos.filter((r) => r.owner.login.toLowerCase() === c.owner.toLowerCase()).map((r) => ({ r, o }));
+      } catch (e) {
+        falhas.push({ owner: c.owner, erro: (e as Error).message });
+        return [];
+      }
+    }),
+  );
+  const todos = porOrg.flat();
+  const clienteDe = new Map(todos.map(({ r, o }) => [`${r.owner.login}/${r.name}`, o]));
+  const squads = todos
+    .map(({ r }) => r)
     .filter((r) => (r.topics ?? []).map((t) => t.toLowerCase()).includes(env.topic))
     .map((r) => ({
       owner: r.owner.login,
@@ -126,15 +142,16 @@ export async function listSquads(user: User): Promise<SquadSummary[]> {
       defaultBranch: r.default_branch,
     }))
     .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
-  if (user.isAdmin) return squads;
+  if (user.isAdmin) return { squads, falhas };
   // usuário comum: só as squads em que o e-mail dele aparece em .squad/members.yaml
   const visiveis = await Promise.all(
     squads.map(async (s) => {
+      const o = clienteDe.get(`${s.owner}/${s.repo}`)!;
       const mem = await readFile(o, s.owner, s.repo, ".squad/members.yaml", s.defaultBranch).catch(() => null);
       return resolveRole(user.email, parseMembers(mem?.content ?? null), false) ? s : null;
     }),
   );
-  return visiveis.filter((s): s is SquadSummary => s !== null);
+  return { squads: visiveis.filter((s): s is SquadSummary => s !== null), falhas: [] };
 }
 
 const DEFAULT_CONFIG: SquadConfig = {
@@ -174,7 +191,8 @@ export function parseConfig(text: string | null, fallbackName: string): SquadCon
 
 /** Carrega a squad e resolve o papel do usuário. Retorna null se não houver acesso. */
 export async function loadSquad(user: User, owner: string, repo: string): Promise<SquadContext | null> {
-  const o = await gh();
+  if (!(await conexaoDe(owner))) return null; // organização não conectada: a squad não existe para o console
+  const o = await gh(owner);
   let repoData;
   try {
     repoData = (await o.repos.get({ owner, repo })).data;

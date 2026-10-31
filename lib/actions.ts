@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import sodium from "libsodium-wrappers";
 import { env } from "./env";
-import { appBotLogin, errDetail, errMsg, gh, missingPermissions, readFile, resetAppCache, status, writeFile } from "./github";
+import { appBotLogin, conexaoDe, errDetail, errMsg, gh, missingPermissions, readFile, resetAppCache, status, writeFile } from "./github";
 import { store } from "./db";
 import { sendInvite } from "./mail";
 import { isValidEmail, normalizeEmail } from "./otp";
@@ -579,16 +579,19 @@ export async function createSquad(_: ActionState, fd: FormData): Promise<ActionS
   try {
     const user = await requireUser();
     if (!user.isAdmin) return { error: "Somente administradores do console podem criar squads." };
-    const o = await gh();
-    const owner = env.githubOrg;
+    const owner = str(fd, "owner", 100);
+    const conexao = await conexaoDe(owner);
+    if (!conexao) return { error: `A organização "${owner}" não está conectada ao console. Conecte em Admin → Conexões.` };
+    const o = await gh(owner);
+    const templateRepo = conexao.template || env.templateRepo;
     const nome = slugify(str(fd, "nome", 80), 80);
     const cliente = str(fd, "cliente", 120);
     const descricao = str(fd, "descricao", 300);
     const plataforma = str(fd, "plataforma", 30) || "agnostico";
     const modelo = str(fd, "modelo", 60) || "sonnet";
     if (!RE_NAME.test(nome) || nome.length < 3) return { error: "Nome do repositório inválido (mínimo 3 caracteres: letras, números e hífen)." };
-    const [tOwner, tRepo] = env.templateRepo.split("/");
-    if (!tOwner || !tRepo) return { error: `SQUAD_TEMPLATE_REPO inválido ("${env.templateRepo}"). Use o formato dono/repositorio.` };
+    const [tOwner, tRepo] = templateRepo.split("/");
+    if (!tOwner || !tRepo) return { error: `Template inválido ("${templateRepo}") na conexão ${owner}. Use o formato dono/repositorio em Admin → Conexões.` };
 
     // ---- pré-checagens: dizem exatamente qual requisito falta ----
     let template;
@@ -596,22 +599,22 @@ export async function createSquad(_: ActionState, fd: FormData): Promise<ActionS
       template = (await o.repos.get({ owner: tOwner, repo: tRepo })).data;
     } catch (e) {
       if (status(e) === 404)
-        return { error: `O GitHub App não acessa o template ${env.templateRepo}. Confira SQUAD_TEMPLATE_REPO e se o App está instalado com acesso a esse repositório.` };
+        return { error: `A organização ${owner} não enxerga o template ${templateRepo}. Use um template público ou um repositório da própria ${owner} (Admin → Conexões → template).` };
       throw e;
     }
-    if (template.full_name.toLowerCase() !== env.templateRepo.toLowerCase())
-      return { error: `O template mudou de endereço: agora é ${template.full_name}. Atualize a variável SQUAD_TEMPLATE_REPO.` };
+    if (template.full_name.toLowerCase() !== templateRepo.toLowerCase())
+      return { error: `O template mudou de endereço: agora é ${template.full_name}. Atualize o template da conexão ${owner} em Admin → Conexões.` };
     if (!template.is_template)
       return { error: `O repositório ${template.full_name} ainda não está marcado como template. No GitHub: Settings → marque "Template repository".` };
-    resetAppCache(); // relê as permissões aprovadas na instalação
-    const perms = await missingPermissions();
+    resetAppCache(owner); // relê as permissões aprovadas na instalação
+    const perms = await missingPermissions(owner);
     if (perms.faltando.length)
       return {
         error: `A instalação do GitHub App em ${owner} não tem estas permissões: ${perms.faltando.join(", ")}. Ajuste em Developer settings → GitHub Apps → Edit → Permissions e aprove em ${owner} → Settings → GitHub Apps → Configure (Review request).`,
       };
     if (perms.selecao && perms.selecao !== "all")
       return { error: `O GitHub App está instalado só em repositórios selecionados. Em ${owner} → Settings → GitHub Apps → Configure, escolha "All repositories" para que as squads novas fiquem acessíveis.` };
-    const existente = await (await gh()).repos.get({ owner, repo: nome }).then(() => true).catch((e) => (status(e) === 404 ? false : Promise.reject(e)));
+    const existente = await o.repos.get({ owner, repo: nome }).then(() => true).catch((e) => (status(e) === 404 ? false : Promise.reject(e)));
     if (existente) return { error: `Já existe um repositório ${owner}/${nome}. Escolha outro nome.` };
 
     try {
@@ -653,7 +656,7 @@ export async function createSquad(_: ActionState, fd: FormData): Promise<ActionS
       doc.set("descricao", descricao);
       doc.set("plataforma", ehPlataforma(plataforma) ? plataforma : "agnostico");
       doc.set("modelo", modelo);
-      doc.set("console_bot", await appBotLogin());
+      doc.set("console_bot", await appBotLogin(owner));
       const usaDbt = fd.get("dbt") === "on";
       if (ehPlataforma(plataforma) || usaDbt) {
         const dados = doc.get("dados");

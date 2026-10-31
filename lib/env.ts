@@ -13,7 +13,7 @@ const list = (v?: string) =>
     .filter(Boolean);
 
 /** Aceita a chave PEM inteira, com "\n" escapados, ou em base64 (mais fácil de colar em painéis). */
-function pem(raw: string): string {
+export function pem(raw: string): string {
   let v = raw.trim();
   if (!v.includes("BEGIN")) {
     try {
@@ -76,8 +76,13 @@ export const env = {
   get githubAppPrivateKey() {
     return pem(req("GITHUB_APP_PRIVATE_KEY"));
   },
+  /** Organização conectada automaticamente na primeira vez (opcional: as demais são cadastradas em Admin → Conexões). */
   get githubOrg() {
-    return req("GITHUB_ORG");
+    return (process.env.GITHUB_ORG || "").trim();
+  },
+  /** Chave para cifrar as chaves de Apps próprios das conexões (padrão: derivada do SESSION_SECRET). */
+  get chaveConexoes() {
+    return process.env.CONEXOES_KEY || this.sessionSecret;
   },
   /** GitHub Enterprise Server: ex. https://github.empresa.com/api/v3 */
   get githubApiUrl() {

@@ -24,6 +24,19 @@ export type CodeRow = {
   attempts: number;
 };
 
+/** Organização do GitHub conectada ao console (onde ficam as squads). */
+export type ConexaoRow = {
+  owner: string; // login da organização, como no GitHub
+  modo: "app_console" | "app_proprio";
+  installationId: number | null;
+  appId: string | null; // só no modo app_proprio
+  chaveCifrada: string | null; // chave privada do App próprio, cifrada (AES-256-GCM)
+  template: string; // dono/repositorio do template das squads
+  ativo: boolean;
+  criadoPor: string;
+  criadoEm: Date;
+};
+
 export interface Store {
   findUserByEmail(email: string): Promise<UserRow | null>;
   findUserById(id: number): Promise<UserRow | null>;
@@ -39,6 +52,10 @@ export interface Store {
 
   audit(e: { actor: string; action: string; target?: string; ip?: string }): Promise<void>;
   listAudit(limit: number): Promise<{ at: Date; actor: string; action: string; target: string | null }[]>;
+
+  listConexoes(): Promise<ConexaoRow[]>;
+  salvarConexao(c: Omit<ConexaoRow, "criadoEm">): Promise<void>;
+  removerConexao(owner: string): Promise<void>;
 }
 
 // =====================================================================  MySQL
@@ -78,6 +95,17 @@ const MIGRATIONS = [
    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
   // erros do servidor são registrados na auditoria com mensagem e local: precisa de mais que 255 caracteres
   `ALTER TABLE sc_audit MODIFY target TEXT NULL`,
+  `CREATE TABLE IF NOT EXISTS sc_conexoes (
+     owner VARCHAR(100) NOT NULL PRIMARY KEY,
+     modo ENUM('app_console','app_proprio') NOT NULL DEFAULT 'app_console',
+     installation_id BIGINT NULL,
+     app_id VARCHAR(40) NULL,
+     chave_cifrada TEXT NULL,
+     template VARCHAR(200) NOT NULL,
+     ativo TINYINT(1) NOT NULL DEFAULT 1,
+     criado_por VARCHAR(254) NOT NULL,
+     criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 ];
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -164,6 +192,31 @@ async function mysqlStore(url: string): Promise<Store> {
         target: r.target,
       }));
     },
+    async listConexoes() {
+      return (await q("SELECT * FROM sc_conexoes ORDER BY owner")).map((r: any) => ({
+        owner: r.owner,
+        modo: r.modo,
+        installationId: r.installation_id ? Number(r.installation_id) : null,
+        appId: r.app_id ?? null,
+        chaveCifrada: r.chave_cifrada ?? null,
+        template: r.template,
+        ativo: Boolean(r.ativo),
+        criadoPor: r.criado_por,
+        criadoEm: new Date(r.criado_em),
+      }));
+    },
+    async salvarConexao(c) {
+      await q(
+        `INSERT INTO sc_conexoes (owner, modo, installation_id, app_id, chave_cifrada, template, ativo, criado_por, criado_em)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())
+         ON DUPLICATE KEY UPDATE modo = VALUES(modo), installation_id = VALUES(installation_id), app_id = VALUES(app_id),
+           chave_cifrada = VALUES(chave_cifrada), template = VALUES(template), ativo = VALUES(ativo)`,
+        [c.owner, c.modo, c.installationId, c.appId, c.chaveCifrada, c.template, c.ativo ? 1 : 0, c.criadoPor],
+      );
+    },
+    async removerConexao(owner) {
+      await q("DELETE FROM sc_conexoes WHERE owner = ?", [owner]);
+    },
   };
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
@@ -174,6 +227,7 @@ export function memoryStore(): Store {
   const users: UserRow[] = [];
   const codes: (CodeRow & { ip: string; createdAt: Date; usedAt: Date | null })[] = [];
   const audits: { at: Date; actor: string; action: string; target: string | null }[] = [];
+  const conexoes: ConexaoRow[] = [];
   let uid = 0;
   let cid = 0;
   const clone = <T,>(x: T): T => (x ? (structuredClone(x) as T) : x);
@@ -224,6 +278,18 @@ export function memoryStore(): Store {
     },
     async listAudit(limit) {
       return clone(audits.slice(-limit).reverse());
+    },
+    async listConexoes() {
+      return clone([...conexoes].sort((a, b) => a.owner.localeCompare(b.owner)));
+    },
+    async salvarConexao(c) {
+      const i = conexoes.findIndex((x) => x.owner.toLowerCase() === c.owner.toLowerCase());
+      if (i >= 0) conexoes[i] = { ...conexoes[i], ...c, criadoPor: conexoes[i].criadoPor, criadoEm: conexoes[i].criadoEm };
+      else conexoes.push({ ...c, criadoEm: new Date() });
+    },
+    async removerConexao(owner) {
+      const i = conexoes.findIndex((x) => x.owner.toLowerCase() === owner.toLowerCase());
+      if (i >= 0) conexoes.splice(i, 1);
     },
   };
 }

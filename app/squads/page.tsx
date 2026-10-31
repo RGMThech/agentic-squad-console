@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { IconLayers, IconPlus } from "@/components/Icons";
 import { PageHead } from "@/components/Shell";
-import { env } from "@/lib/env";
 import { ago } from "@/lib/format";
 import { errMsg } from "@/lib/github";
 import { requireUser } from "@/lib/session";
@@ -12,12 +11,14 @@ export const metadata = { title: "Squads" };
 export default async function SquadsPage() {
   const user = await requireUser();
   let squads: SquadSummary[] = [];
+  let falhas: { owner: string; erro: string }[] = [];
   let erro = "";
   try {
-    squads = await listSquads(user);
+    ({ squads, falhas } = await listSquads(user));
   } catch (e) {
     erro = errMsg(e);
   }
+  const orgs = [...new Set(squads.map((s) => s.owner))];
 
   return (
     <>
@@ -25,7 +26,7 @@ export default async function SquadsPage() {
         title={user.isAdmin ? "Squads" : "Suas squads"}
         subtitle={
           user.isAdmin
-            ? `Todas as squads da organização ${env.githubOrg}.`
+            ? "Squads de todas as organizações do GitHub conectadas ao console."
             : "Squads em que você faz parte da equipe."
         }
         actions={
@@ -38,6 +39,12 @@ export default async function SquadsPage() {
       />
       <div className="content">
         {erro && <div className="alert alert-error">{erro}</div>}
+        {user.isAdmin &&
+          falhas.map((f) => (
+            <div key={f.owner} className="alert alert-warn small" style={{ marginBottom: 12 }}>
+              Não consegui ler as squads de <b>{f.owner}</b>: {f.erro} <Link href="/admin/conexoes">Ver conexões →</Link>
+            </div>
+          ))}
         {!erro && squads.length === 0 && (
           <div className="card empty">
             <div className="ic">
@@ -56,6 +63,7 @@ export default async function SquadsPage() {
             )}
           </div>
         )}
+        {orgs.length > 1 && <p className="small muted" style={{ marginBottom: 12 }}>{orgs.length} organizações: {orgs.join(", ")}</p>}
         <div className="grid grid-3">
           {squads.map((s) => (
             <Link key={`${s.owner}/${s.repo}`} href={`/s/${s.owner}/${s.repo}`} className="card squad-card">

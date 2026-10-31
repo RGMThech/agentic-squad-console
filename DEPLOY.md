@@ -120,8 +120,9 @@ Na página do App → **Install App** → **RGMThech** → **All repositories** 
 | `ADMIN_EMAILS` | seu e-mail, por exemplo `voce@empresa.com.br` (vários separados por vírgula) |
 | `GITHUB_APP_ID` | passo 3.2 |
 | `GITHUB_APP_PRIVATE_KEY` | o base64 do `.pem` (passo 3.2) |
-| `GITHUB_ORG` | `RGMThech` |
-| `SQUAD_TEMPLATE_REPO` | `RGMThech/agentic-data-squad` |
+| `GITHUB_ORG` | opcional: a primeira organização (ex.: `RGMThech`); as outras são conectadas no console |
+| `SQUAD_TEMPLATE_REPO` | template padrão, `RGMThech/agentic-data-squad` (cada conexão pode ter o seu) |
+| `CONEXOES_KEY` | opcional: texto aleatório de 32+ caracteres para cifrar chaves de Apps próprios (padrão: `SESSION_SECRET`) |
 | `SQUAD_TOPIC` | `agentic-data-squad` |
 
 Gerar o `SESSION_SECRET` no PowerShell:
@@ -189,3 +190,25 @@ O botão **Testar conexão** do card *Acesso a dados* é executado pelo servidor
 | Microsoft Fabric | `login.microsoftonline.com` (443) e o SQL endpoint `*.datawarehouse.fabric.microsoft.com`, **porta 1433** |
 
 Se a hospedagem bloquear a porta 1433 de saída, o teste do Fabric para em "Conexão ao SQL endpoint". Os agentes não são afetados, porque rodam no GitHub Actions.
+
+## Usar o console com outras organizações do GitHub
+
+O console não fica preso a uma organização. Cada squad é um repositório na organização dela, e os agentes rodam no GitHub Actions de lá. Em **Admin → Conexões** você conecta quantas organizações quiser (a sua, as de clientes), cada uma com o próprio template.
+
+**Opção A — App do Squad Console (mais simples)**
+1. Uma vez só: no GitHub, Developer settings → GitHub Apps → *RGM Squad Console* → **Advanced → Make public**. Sem isso, o App só pode ser instalado na sua conta.
+2. Um administrador da organização do cliente abre o link **Instalar o App em outra organização** (em Conexões), escolhe a organização e **All repositories**.
+3. No console, a organização aparece em "App instalado, ainda não conectado": clique em **Conectar**.
+
+**Opção B — GitHub App do próprio cliente** (para quem não pode instalar Apps de terceiros)
+1. O cliente cria um GitHub App na organização dele, com as mesmas permissões do passo 3.2, e instala em **All repositories**.
+2. Em Conexões → *Com um GitHub App próprio*, informe a organização, o App ID e a chave privada. A chave fica cifrada no banco (`CONEXOES_KEY`).
+
+**Em cada organização conectada:**
+- Actions → General → Workflow permissions: **Read and write** e **Allow GitHub Actions to create and approve pull requests**;
+- o template precisa ser público ou um repositório da própria organização, marcado como Template repository.
+
+As squads precisam de uma **organização** do GitHub (pode ser gratuita); contas pessoais não são suportadas.
+
+Desconectar uma organização só a tira do console: os repositórios, o histórico e os segredos continuam no GitHub do cliente.
+
