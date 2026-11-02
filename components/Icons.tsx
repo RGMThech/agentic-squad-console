@@ -33,3 +33,28 @@ export const IconGithub = (p: P) => (
     <path d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.2c-3.3.7-4-1.4-4-1.4-.6-1.4-1.4-1.8-1.4-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.9 1.2 1.9 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.6 18.3 5 18.3 5c.6 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5z" />
   </svg>
 );
+
+// ícones dos tipos de squad (tipos/base.yaml → icone)
+export const IconChart = (p: P) => base(p, <><path d="M3 3v18h18" /><path d="M7 15l4-4 3 3 5-6" /></>);
+export const IconCode = (p: P) => base(p, <><path d="m8 7-5 5 5 5" /><path d="m16 7 5 5-5 5" /><path d="m14 4-4 16" /></>);
+export const IconMegaphone = (p: P) => base(p, <><path d="M3 11v2a1 1 0 0 0 1 1h3l6 4V6L7 10H4a1 1 0 0 0-1 1z" /><path d="M17 8a5 5 0 0 1 0 8" /><path d="M7 14l1.5 5h2.5L10 14" /></>);
+export const IconCompass = (p: P) => base(p, <><circle cx="12" cy="12" r="9" /><path d="m15.5 8.5-2 5-5 2 2-5z" /></>);
+export const IconBrain = (p: P) => base(p, <><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 3 3h0a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z" /><path d="M15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-3 3h0a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" /></>);
+export const IconHandshake = (p: P) => base(p, <><path d="m11 17 2 2a1.5 1.5 0 0 0 2-2" /><path d="m13 15 2.5 2.5a1.5 1.5 0 0 0 2-2L14 12" /><path d="M3 7l4-3 5 3 5-3 4 3v6l-4 3" /><path d="M3 7v6l7 6a1.5 1.5 0 0 0 2-2" /><path d="M12 7 9 10a1.5 1.5 0 0 0 2 2l3-2" /></>);
+export const IconHeadset = (p: P) => base(p, <><path d="M4 14v-2a8 8 0 0 1 16 0v2" /><rect x="3" y="14" width="4" height="6" rx="1.5" /><rect x="17" y="14" width="4" height="6" rx="1.5" /><path d="M19 20a3 3 0 0 1-3 2h-3" /></>);
+
+const ICONES_TIPO: Record<string, (p: P) => React.ReactElement> = {
+  chart: IconChart,
+  code: IconCode,
+  megaphone: IconMegaphone,
+  compass: IconCompass,
+  brain: IconBrain,
+  handshake: IconHandshake,
+  headset: IconHeadset,
+  layers: IconLayers,
+};
+
+export function IconeTipo({ icone, ...p }: P & { icone: string }) {
+  const I = ICONES_TIPO[icone] ?? IconLayers;
+  return <I {...p} />;
+}

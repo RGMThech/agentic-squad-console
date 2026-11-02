@@ -1,8 +1,10 @@
 import "server-only";
 import YAML from "yaml";
 import type { Feature, SquadContext } from "./squad";
+import { TIPO_PADRAO, type Pasta } from "./tipo.ts";
 
-export type Categoria = "documentos" | "contratos" | "pipelines" | "testes" | "docs" | "outros";
+/** "documentos" (pasta da feature), uma chave por pasta de entrega do tipo, ou "outros". */
+export type Categoria = string;
 
 export type ArquivoEntrega = {
   path: string;
@@ -27,28 +29,43 @@ export type ObjetoEntrega = {
   contrato: string;
 };
 
-export const ROTULO_CATEGORIA: Record<Categoria, string> = {
-  documentos: "Especificação, design e relatórios",
-  contratos: "Contratos de dados",
-  pipelines: "Pipelines",
-  testes: "Testes",
-  docs: "Documentação e ADRs",
-  outros: "Outros arquivos",
-};
+/** Chaves das pastas do tipo dados (mantidas para as squads antigas e o dossiê). */
+const CHAVE_DADOS: Record<string, string> = { "contracts/": "contratos", "pipelines/": "pipelines", "models/": "pipelines", "tests/": "testes", "docs/": "docs", "semantic/": "semantica" };
+
+function chaveDaPasta(prefixo: string): string {
+  return CHAVE_DADOS[prefixo] ?? prefixo.replace(/\/$/, "");
+}
+
+/** Grupos da aba Entrega, na ordem: documentos da feature, pastas do tipo, outros. */
+export function categoriasDaEntrega(pastas: Pasta[] = TIPO_PADRAO.pastas): { chave: Categoria; rotulo: string; prefixos: string[] }[] {
+  const grupos: { chave: Categoria; rotulo: string; prefixos: string[] }[] = [{ chave: "documentos", rotulo: "Especificação, design e relatórios", prefixos: [] }];
+  for (const p of pastas) {
+    const chave = chaveDaPasta(p.prefixo);
+    const g = grupos.find((x) => x.chave === chave);
+    if (g) g.prefixos.push(p.prefixo);
+    else grupos.push({ chave, rotulo: p.rotulo, prefixos: [p.prefixo] });
+  }
+  // dbt: models/ conta como pipeline quando o tipo tem pipelines/
+  const pip = grupos.find((g) => g.chave === "pipelines");
+  if (pip && !pip.prefixos.includes("models/")) pip.prefixos.push("models/");
+  grupos.push({ chave: "outros", rotulo: "Outros arquivos", prefixos: [] });
+  return grupos;
+}
+
+export const ROTULO_CATEGORIA: Record<string, string> = Object.fromEntries(categoriasDaEntrega().map((g) => [g.chave, g.rotulo]));
 
 const ORDEM_DOCS = ["pedido.md", "spec.md", "design.md", "tasks.md", "qa-report.md", "review.md", "entrega.md"];
 const RE_TEXTO = /\.(md|markdown|txt|sql|py|ya?ml|json|csv|toml|ini|cfg|sh|ipynb|r|scala|jinja2?|j2)$/i;
 
-export function categoria(path: string, feature: string): { categoria: Categoria; camada?: string } {
+export function categoria(path: string, feature: string, pastas: Pasta[] = TIPO_PADRAO.pastas): { categoria: Categoria; camada?: string } {
   if (path.startsWith(`specs/${feature}/`)) return { categoria: "documentos" };
-  if (path.startsWith("contracts/")) return { categoria: "contratos" };
-  if (path.startsWith("pipelines/") || path.startsWith("models/")) {
+  const g = categoriasDaEntrega(pastas).find((x) => x.prefixos.some((p) => path.startsWith(p)));
+  if (!g) return { categoria: "outros" };
+  if (g.chave === "pipelines") {
     const camada = path.match(/(bronze|silver|gold)/i)?.[1]?.toLowerCase() ?? path.match(/\/(brz|slv|gld)_/)?.[1];
-    return { categoria: "pipelines", camada: camada === "brz" ? "bronze" : camada === "slv" ? "silver" : camada === "gld" ? "gold" : camada };
+    return { categoria: g.chave, camada: camada === "brz" ? "bronze" : camada === "slv" ? "silver" : camada === "gld" ? "gold" : camada };
   }
-  if (path.startsWith("tests/")) return { categoria: "testes" };
-  if (path.startsWith("docs/")) return { categoria: "docs" };
-  return { categoria: "outros" };
+  return { categoria: g.chave };
 }
 
 function ordem(a: ArquivoEntrega, b: ArquivoEntrega): number {
@@ -88,12 +105,14 @@ export async function arquivosDaFeature(ctx: SquadContext, f: Feature): Promise<
   } catch {
     /* pasta ainda não existe */
   }
+  const pastas = ctx.tipo?.pastas ?? TIPO_PADRAO.pastas;
+  const ordemGrupos = categoriasDaEntrega(pastas).map((g) => g.chave);
   return lista
     .map(({ path, status }) => {
-      const c = categoria(path, f.id);
+      const c = categoria(path, f.id, pastas);
       return { path, nome: path.split("/").pop() ?? path, ...c, status, texto: RE_TEXTO.test(path), url: web(path) };
     })
-    .sort((a, b) => Object.keys(ROTULO_CATEGORIA).indexOf(a.categoria) - Object.keys(ROTULO_CATEGORIA).indexOf(b.categoria) || ordem(a, b));
+    .sort((a, b) => ordemGrupos.indexOf(a.categoria) - ordemGrupos.indexOf(b.categoria) || ordem(a, b));
 }
 
 /** Lê um arquivo como bytes (inclui arquivos acima de 1 MB, via blob). */

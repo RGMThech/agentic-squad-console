@@ -1,22 +1,32 @@
 import Link from "next/link";
 import { SolicitarConvite } from "@/components/SolicitarConvite";
-import { IconBot, IconCheck, IconCoins, IconGate, IconLayers, IconSettings } from "@/components/Icons";
+import { IconBot, IconCheck, IconCoins, IconeTipo, IconGate, IconLayers, IconSettings } from "@/components/Icons";
 import { BRAND } from "@/lib/brand";
 import { currentUser } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 const GATES = [
-  { g: "G1", t: "Spec", d: "O analista transforma o pedido em especificação e lista as dúvidas. Você responde e aprova." },
-  { g: "G2", t: "Design", d: "O arquiteto modela a solução, os contratos de dados e o mapa de dados pessoais. Você aprova." },
-  { g: "G3", t: "Produção", d: "Engenheiros, QA, revisor e documentação entregam. Com tudo verde, você libera o merge." },
+  { g: "G1", t: "Especificação", d: "Um agente transforma o pedido em especificação (spec, briefing, problema) e lista as dúvidas. Você responde e aprova." },
+  { g: "G2", t: "Design", d: "Outro agente desenha a solução: arquitetura, plano de campanha, PRD, playbook ou jornada. Você aprova." },
+  { g: "G3", t: "Entrega", d: "Os agentes executam as tarefas em paralelo; QA, revisor e documentação conferem. Com tudo encerrado, você libera." },
+];
+
+const TIPOS = [
+  { icone: "chart", t: "Data Analytics", d: "Pipelines, modelos de dados, métricas e painéis." },
+  { icone: "code", t: "Desenvolvimento de Software", d: "Funcionalidades, APIs, integrações e correções." },
+  { icone: "megaphone", t: "Marketing", d: "Campanhas, conteúdo, SEO e mídia." },
+  { icone: "compass", t: "Produto", d: "Discovery, PRD, protótipos e backlog priorizado." },
+  { icone: "brain", t: "IA e Machine Learning", d: "Modelos, LLMs, RAG e agentes, com avaliação." },
+  { icone: "handshake", t: "Vendas e pré-vendas", d: "Pesquisa de contas, cadências, propostas e playbooks." },
+  { icone: "headset", t: "Atendimento / CX", d: "Base de conhecimento, fluxos de chatbot e macros." },
 ];
 
 const RECURSOS = [
-  { ic: <IconBot size={20} />, t: "Nove agentes especializados", d: "Requisitos, arquitetura, ingestão, transformação, QA, BI, revisão, governança e orquestração — cada um com escopo e ferramentas restritos." },
-  { ic: <IconGate size={20} />, amber: true, t: "Três gates humanos", d: "Nada vai para produção sem a sua aprovação. Spec com dúvida aberta não passa." },
+  { ic: <IconBot size={20} />, t: "Agentes especializados por tipo", d: "Especificação, design, execução, QA, revisão, documentação e orquestração — cada um com escopo e ferramentas restritos." },
+  { ic: <IconGate size={20} />, amber: true, t: "Três gates humanos", d: "Nada é entregue sem a sua aprovação. Spec com dúvida aberta não passa; os agentes não publicam nada." },
   { ic: <IconCoins size={20} />, t: "Custo sob controle", d: "Turnos, duração e custo de cada execução, por agente, por feature e por mês." },
-  { ic: <IconSettings size={20} />, t: "Harness auditável", d: "Convenções, contratos e papéis versionados no repositório. Toda mudança deixa rastro." },
+  { ic: <IconSettings size={20} />, t: "Harness auditável", d: "Convenções, validadores e papéis versionados no repositório. Os agentes não mudam as próprias regras." },
 ];
 
 export default async function Landing() {
@@ -44,10 +54,10 @@ export default async function Landing() {
 
       <section className="site-hero">
         <div className="site-wrap">
-          <p className="eyebrow">Squad agêntica de Data Analytics</p>
-          <h1>Um humano no comando. Uma squad inteira de agentes entregando dados.</h1>
+          <p className="eyebrow">Squads agênticas por feature e por tarefa</p>
+          <h1>Um humano no comando. Uma squad inteira de agentes entregando.</h1>
           <p className="lead">
-            Você define o problema e aprova três gates. Os agentes especificam, modelam, constroem, testam e documentam — sob regras que impedem o erro de chegar à produção.
+            Dados, software, marketing, produto, IA, vendas ou atendimento: você define o pedido e aprova três gates. Os agentes especificam, desenham, executam, verificam e documentam — sob regras que impedem o erro de chegar à entrega.
           </p>
           <div className="row" style={{ gap: 12, marginTop: 28 }}>
             <Link href={cta.href} className="btn btn-gate" style={{ height: 46, padding: "0 24px", fontSize: 15 }}>
@@ -57,7 +67,7 @@ export default async function Landing() {
           </div>
           <div className="site-stats">
             <div><b>1</b><span>humano no comando</span></div>
-            <div><b>9</b><span>agentes especializados</span></div>
+            <div><b>7</b><span>tipos de squad</span></div>
             <div><b>3</b><span>gates de aprovação</span></div>
           </div>
         </div>
@@ -83,6 +93,26 @@ export default async function Landing() {
 
       <section className="site-section site-alt">
         <div className="site-wrap">
+          <h2 className="site-h2">Um modelo, sete tipos de squad</h2>
+          <p className="muted site-sub">O mesmo fluxo por feature e por tarefa, com agentes, templates e validadores próprios de cada área.</p>
+          <div className="grid grid-3" style={{ marginTop: 24 }}>
+            {TIPOS.map((t) => (
+              <div key={t.t} className="card card-pad row" style={{ alignItems: "flex-start", gap: 14, flexWrap: "nowrap" }}>
+                <span className="site-ic">
+                  <IconeTipo icone={t.icone} size={20} />
+                </span>
+                <div>
+                  <h3>{t.t}</h3>
+                  <p className="muted small" style={{ marginTop: 4 }}>{t.d}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="site-section">
+        <div className="site-wrap">
           <h2 className="site-h2">O que vem com a squad</h2>
           <div className="grid grid-2" style={{ marginTop: 24 }}>
             {RECURSOS.map((f) => (
@@ -98,7 +128,7 @@ export default async function Landing() {
         </div>
       </section>
 
-      <section className="site-section">
+      <section className="site-section site-alt">
         <div className="site-wrap site-cta">
           <div>
             <h2 className="site-h2">Segurança desde o login</h2>
@@ -121,9 +151,9 @@ export default async function Landing() {
         </div>
       </section>
 
-      <section className="site-section site-alt" id="convite">
+      <section className="site-section" id="convite">
         <div className="site-wrap convite">
-          <h2 className="site-h2">Quer uma squad agêntica no seu time de dados?</h2>
+          <h2 className="site-h2">Quer uma squad agêntica no seu time?</h2>
           <p className="muted" style={{ maxWidth: 620, margin: "10px auto 26px" }}>
             O acesso é só por convite. Conte quem você é e o que quer resolver; respondemos por e-mail.
           </p>

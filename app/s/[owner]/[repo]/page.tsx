@@ -19,7 +19,7 @@ export default async function Overview({ params }: { params: SquadParams }) {
   const b = `/s/${owner}/${repo}`;
 
   const ativas = features.filter((f) => f.gates.g3 !== "aprovado");
-  const situacoes = new Map(features.map((f) => [f.id, situacaoDaFeature(f, runs)]));
+  const situacoes = new Map(features.map((f) => [f.id, situacaoDaFeature(f, runs, ctx.tipo.papeis)]));
   const aguardando = ativas.filter((f) => ["voce", "erro"].includes(situacoes.get(f.id)!.tipo));
   const rodando = runs.filter(isRunning);
   const novas = rodando.filter((r, i, all) => !features.some((f) => f.id === r.feature) && all.findIndex((x) => x.feature === r.feature) === i);
@@ -36,7 +36,8 @@ export default async function Overview({ params }: { params: SquadParams }) {
         subtitle={
           <span className="row" style={{ gap: 8 }}>
             <RoleBadge role={ctx.role} />
-            <span>{ctx.config.descricao || "Squad agêntica de Data Analytics"}</span>
+            <span className="badge">{ctx.tipo.nome}</span>
+            <span>{ctx.config.descricao || `Squad agêntica de ${ctx.tipo.nome}`}</span>
             <a href={ctx.htmlUrl} target="_blank" rel="noreferrer" className="row" style={{ gap: 4 }}>
               {owner}/{repo} <IconExternal size={13} />
             </a>
@@ -77,7 +78,7 @@ export default async function Overview({ params }: { params: SquadParams }) {
         <section className="card">
           <div className="card-head">
             <h2>Features</h2>
-            <span className="muted small">G1 spec · G2 design · G3 produção</span>
+            <span className="muted small">G1 {ctx.tipo.rotulos.g1.toLowerCase()} · G2 {ctx.tipo.rotulos.g2.toLowerCase()} · G3 {ctx.tipo.rotulos.g3.toLowerCase()}</span>
           </div>
           {features.length === 0 && novas.length === 0 ? (
             <div className="empty">
@@ -114,7 +115,7 @@ export default async function Overview({ params }: { params: SquadParams }) {
                       </td>
                       <td>
                         <span className="badge badge-blue">
-                          <span className="dot pulse" /> Analista escrevendo a spec
+                          <span className="dot pulse" /> {ctx.tipo.papeis.especificacao} escrevendo a spec
                         </span>
                       </td>
                       <td>

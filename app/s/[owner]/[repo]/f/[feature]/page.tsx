@@ -20,8 +20,8 @@ import { isRunning, listFeatureIds, listRuns, loadFeature, prChecks, situacaoDaF
 
 const ABAS = [
   { k: "pedido", t: "Pedido" },
-  { k: "spec", t: "Spec" },
-  { k: "design", t: "Design" },
+  { k: "spec", t: "" }, // rótulos do G1 e G2 vêm do tipo da squad
+  { k: "design", t: "" },
   { k: "tarefas", t: "Tarefas" },
   { k: "qa", t: "QA" },
   { k: "revisao", t: "Revisão" },
@@ -68,7 +68,7 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
             <span className="badge badge-blue" style={{ alignSelf: "flex-start" }}>
               <span className="dot pulse" /> Preparando a feature
             </span>
-            <h2>O analista de requisitos está escrevendo a spec</h2>
+            <h2>O {ctx.tipo.papeis.especificacao} está escrevendo a spec</h2>
             <p className="muted">
               A execução leva alguns minutos. Esta página atualiza sozinha. Quando terminar, a spec aparece aqui com as dúvidas para você responder.
             </p>
@@ -82,11 +82,13 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
   const f = await loadFeature(ctx, feature, entry.branch, prs, true);
   const aba = abaPedida ?? (f.gates.g3 === "aprovado" ? "entrega" : "spec");
   const checks = f.pr && f.pr.state === "open" ? await prChecks(ctx, f.pr.headSha) : null;
-  const sit = situacaoDaFeature(f, runs);
+  const sit = situacaoDaFeature(f, runs, ctx.tipo.papeis);
   const ultima = ultimaExecucao(f, runs);
-  const passo = nextStep(f.gates, feature);
+  const passo = nextStep(f.gates, feature, ctx.tipo.papeis);
   const sugestao = sit.acao === "acionar" && sit.agente ? { agente: sit.agente, instrucao: sit.instrucao ?? passo.instrucao } : passo;
   const operador = can(ctx.role, "aprovar");
+  const rot = ctx.tipo.rotulos;
+  const pap = ctx.tipo.papeis;
   const duvidas = f.spec ? parseDoubts(f.spec.body) : { abertas: [], resolvidas: [] };
   const hidden = (
     <>
@@ -121,7 +123,7 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
             <SituacaoCard s={sit} rodando={running[0] ?? null} ultima={ultima} podeAgir={can(ctx.role, "acionar")} />
 
             <div className="card card-pad">
-              <GateTrack gates={f.gates} running={running.length > 0} />
+              <GateTrack gates={f.gates} running={running.length > 0} rotulos={rot} />
             </div>
 
             {f.spec && f.gates.g1 !== "aprovado" && duvidas.abertas.length > 0 && (
@@ -143,7 +145,7 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
               <nav className="tabs" aria-label="Artefatos">
                 {ABAS.map((a) => (
                   <Link key={a.k} href={`${fb}?aba=${a.k}`} aria-current={aba === a.k ? "page" : undefined}>
-                    {a.t}
+                    {a.k === "spec" ? rot.g1 : a.k === "design" ? rot.g2 : a.t}
                     {a.k === "execucoes" && runs.length > 0 && <span className="badge">{runs.length}</span>}
                   </Link>
                 ))}
@@ -165,13 +167,13 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
                     <div className="card-pad doc-acoes">
                       <span className="small muted">Precisa mudar algo na definição?</span>
                       <Link href={`${fb}/spec`} className="btn btn-sm">Editar a spec</Link>
-                      <a href="#ajustar" className="btn btn-sm">Pedir ao analista</a>
+                      <a href="#ajustar" className="btn btn-sm">Pedir ao {pap.especificacao}</a>
                     </div>
                   )}
                   <DocView doc={f.spec} vazio="A spec ainda não foi criada." />
                 </>
               )}
-              {aba === "design" && <DocView doc={f.design} vazio="O design é criado pelo arquiteto depois do G1." />}
+              {aba === "design" && <DocView doc={f.design} vazio={`O ${rot.g2.toLowerCase()} é criado pelo ${pap.design} depois do G1.`} />}
               {aba === "tarefas" &&
                 (f.tasks.length ? (
                   <TarefasView
@@ -187,7 +189,7 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
                     }
                   />
                 ) : (
-                  <DocView doc={f.tasksDoc} vazio="As tarefas são criadas pelo orquestrador depois do G2." />
+                  <DocView doc={f.tasksDoc} vazio={`As tarefas são criadas pelo ${pap.orquestracao} depois do G2.`} />
                 ))}
               {aba === "qa" && <DocView doc={f.qa} vazio="Ainda não há relatório de QA." />}
               {aba === "revisao" && <DocView doc={f.review} vazio="Ainda não há parecer do revisor." />}
@@ -204,22 +206,22 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
             {/* ---------------- G1 ---------------- */}
             {f.gates.g1 === "aguardando" && (
               <div className="card card-pad stack-sm" id="decisao">
-                <span className="badge badge-amber" style={{ alignSelf: "flex-start" }}>G1 · Spec</span>
+                <span className="badge badge-amber" style={{ alignSelf: "flex-start" }}>G1 · {rot.g1}</span>
                 {f.doubts.length > 0 ? (
                   <>
                     <h3>{f.doubts.length} dúvida(s) em aberto</h3>
                     <p className="small muted">
                       {running.length > 0
-                        ? "O analista está reprocessando a spec."
+                        ? `O ${pap.especificacao} está reprocessando a spec.`
                         : operador
-                          ? "Responda no painel ao lado e envie ao analista. O G1 libera quando não restar dúvida."
+                          ? `Responda no painel ao lado e envie ao ${pap.especificacao}. O G1 libera quando não restar dúvida.`
                           : "Aguardando o operador responder."}
                     </p>
                   </>
                 ) : running.length > 0 ? (
                   <EsperaAgente agente={running[0].agente} />
                 ) : operador ? (
-                  <GateActions gate="G1" hidden={hidden} proximo="arquiteto-dados" />
+                  <GateActions gate="G1" hidden={hidden} proximo={pap.design} />
                 ) : (
                   <p className="small muted">Spec pronta. Aguardando aprovação do operador.</p>
                 )}
@@ -229,13 +231,13 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
             {/* ---------------- G2 ---------------- */}
             {f.gates.g2 === "aguardando" && (
               <div className="card card-pad stack-sm" id="decisao">
-                <span className="badge badge-amber" style={{ alignSelf: "flex-start" }}>G2 · Design</span>
+                <span className="badge badge-amber" style={{ alignSelf: "flex-start" }}>G2 · {rot.g2}</span>
                 {running.length > 0 ? (
                   <EsperaAgente agente={running[0].agente} />
                 ) : operador ? (
-                  <GateActions gate="G2" hidden={hidden} proximo="orquestrador" />
+                  <GateActions gate="G2" hidden={hidden} proximo={pap.orquestracao} />
                 ) : (
-                  <p className="small muted">Design pronto. Aguardando aprovação do operador.</p>
+                  <p className="small muted">{rot.g2} pronto. Aguardando aprovação do operador.</p>
                 )}
               </div>
             )}
@@ -243,8 +245,8 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
             {/* ---------------- G3 ---------------- */}
             {f.gates.g3 === "aguardando" && (
               <div className="card card-pad stack-sm" id="decisao">
-                <span className="badge badge-amber" style={{ alignSelf: "flex-start" }}>G3 · Produção</span>
-                <h3>Pronto para produção</h3>
+                <span className="badge badge-amber" style={{ alignSelf: "flex-start" }}>G3 · {rot.g3}</span>
+                <h3>Pronto para o G3</h3>
                 <div className="row small">
                   QA <DocBadge value={f.qa?.data.veredito} /> Revisor <DocBadge value={f.review?.data.veredito} />
                 </div>
@@ -263,11 +265,11 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
                       {hidden}
                     </ActionForm>
                     <details>
-                      <summary className="small" style={{ cursor: "pointer" }}>Pedir ajustes ao orquestrador</summary>
+                      <summary className="small" style={{ cursor: "pointer" }}>Pedir ajustes ao {pap.orquestracao}</summary>
                       <ActionForm action={requestChanges} submit="Enviar ajustes" variant="default" resetOnOk>
                         {hidden}
                         <input type="hidden" name="gate" value="G3" />
-                        <textarea name="feedback" className="textarea" required placeholder="O que precisa mudar antes de ir para produção?" />
+                        <textarea name="feedback" className="textarea" required placeholder="O que precisa mudar antes da entrega?" />
                       </ActionForm>
                     </details>
                   </>
@@ -302,10 +304,10 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
                   Editar a spec eu mesmo
                 </Link>
                 <details>
-                  <summary className="small" style={{ cursor: "pointer" }}>Pedir a mudança ao analista</summary>
-                  <ActionForm action={askSpecChange} submit="Enviar ao analista" variant="default" resetOnOk>
+                  <summary className="small" style={{ cursor: "pointer" }}>Pedir a mudança ao {pap.especificacao}</summary>
+                  <ActionForm action={askSpecChange} submit={`Enviar ao ${pap.especificacao}`} variant="default" resetOnOk>
                     {hidden}
-                    <textarea name="pedido" className="textarea" required placeholder="Ex.: incluir os votos nulos e brancos no relatório por município; o corte passa a ser o 2º turno." />
+                    <textarea name="pedido" className="textarea" required placeholder="Ex.: incluir mais um caso no escopo; o prazo passa a ser o fim do mês." />
                   </ActionForm>
                 </details>
               </div>

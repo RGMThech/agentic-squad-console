@@ -12,6 +12,7 @@ import { getSquad, type SquadParams } from "@/lib/page";
 import { apiKeyStatus, listSquadPRs, secretStatus } from "@/lib/squad";
 import { DadosCard } from "@/components/DadosCard";
 import { TODOS_SEGREDOS } from "@/lib/dados-meta";
+import { DOCS_DO_TIPO } from "@/lib/tipo";
 
 export const metadata = { title: "Configuração" };
 
@@ -23,7 +24,7 @@ export default async function ConfigPage({ params, searchParams }: { params: Squ
   const operador = can(ctx.role, "configurar");
   const edit = (p: string) => `${b}/config/edit?path=${encodeURIComponent(p)}`;
 
-  const [agentFiles, skillDirs, key, configPRs, workflow, protecao, usuarios, bot, segredosDados] = await Promise.all([
+  const [agentFiles, skillDirs, key, configPRs, workflow, protecao, usuarios, bot, segredosDados, tipoYaml] = await Promise.all([
     listDir(ctx.o, owner, repo, ".claude/agents", ctx.defaultBranch),
     listDir(ctx.o, owner, repo, ".claude/skills", ctx.defaultBranch),
     operador ? apiKeyStatus(ctx) : Promise.resolve(null),
@@ -35,6 +36,7 @@ export default async function ConfigPage({ params, searchParams }: { params: Squ
     operador
       ? Promise.all(TODOS_SEGREDOS.map((n) => secretStatus(ctx, n).then((x) => [n, x.set] as const).catch(() => [n, false] as const))).then(Object.fromEntries)
       : Promise.resolve({} as Record<string, boolean>),
+    readFile(ctx.o, owner, repo, "AGENTS.tipo.md", ctx.defaultBranch).catch(() => null),
   ]);
   const contas = new Map(usuarios.map((u) => [u.email, u]));
 
@@ -276,9 +278,10 @@ export default async function ConfigPage({ params, searchParams }: { params: Squ
               <h2>Constituição e convenções</h2>
             </div>
             {[
-              ["AGENTS.md", "Constituição da squad: gates, papéis, regras e definição de pronto"],
+              ["AGENTS.md", "Constituição comum: fluxo, gates, segurança e definição de pronto"],
+              ...(tipoYaml ? [["AGENTS.tipo.md", `Regras do tipo ${ctx.tipo.nome}: papéis, convenções e pronto`]] : []),
               ["CLAUDE.md", "Ponteiro lido pelos agentes ao iniciar"],
-              ["docs/naming-convention.md", "Convenção de nomes completa"],
+              ...(DOCS_DO_TIPO[ctx.tipo.tipo] ?? []),
               ...skillDirs.filter((d) => d.type === "dir").map((d) => [`${d.path}/SKILL.md`, `Skill ${d.name}`]),
             ].map(([p, d]) => (
               <Link key={p} href={edit(p)} className="spread small" style={{ color: "inherit", padding: "6px 0", borderBottom: "1px solid var(--line)" }}>

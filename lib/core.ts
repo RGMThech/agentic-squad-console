@@ -346,19 +346,23 @@ export function computeGates(i: GateInput): { g1: GateState; g2: GateState; g3: 
   return { g1, g2, g3 };
 }
 
+/** Agentes de cada papel do fluxo (os do tipo dados, quando a squad não diz outros). */
+export type PapeisFluxo = { especificacao: string; design: string; orquestracao: string; documentacao: string };
+const PAPEIS_DADOS: PapeisFluxo = { especificacao: "analista-requisitos", design: "arquiteto-dados", orquestracao: "orquestrador", documentacao: "governanca-docs" };
+
 /** Próximo agente sugerido e instrução padrão para o estado atual. */
-export function nextStep(g: { g1: GateState; g2: GateState; g3: GateState }, feature: string) {
+export function nextStep(g: { g1: GateState; g2: GateState; g3: GateState }, feature: string, papeis: PapeisFluxo = PAPEIS_DADOS) {
   if (g.g1 === "pendente")
-    return { agente: "analista-requisitos", instrucao: `Crie a spec da feature ${feature} a partir do pedido registrado.` };
+    return { agente: papeis.especificacao, instrucao: `Crie a spec da feature ${feature} a partir do pedido registrado.` };
   if (g.g1 === "aguardando")
-    return { agente: "analista-requisitos", instrucao: "Incorpore as respostas e ajustes do Operador na spec." };
+    return { agente: papeis.especificacao, instrucao: "Incorpore as respostas e ajustes do Operador na spec." };
   if (g.g2 === "pendente")
-    return { agente: "arquiteto-dados", instrucao: `A spec de ${feature} foi aprovada (G1). Produza o design.md, os contratos e os ADRs necessários.` };
+    return { agente: papeis.design, instrucao: `A spec de ${feature} foi aprovada (G1). Produza o design.md e os artefatos de design previstos em AGENTS.tipo.md.` };
   if (g.g2 === "aguardando")
-    return { agente: "arquiteto-dados", instrucao: "Incorpore os ajustes do Operador no design." };
+    return { agente: papeis.design, instrucao: "Incorpore os ajustes do Operador no design." };
   if (g.g3 === "pendente")
-    return { agente: "orquestrador", instrucao: `Spec e design de ${feature} aprovados (G1 e G2). Execute a feature até deixar o G3 pronto: tasks, implementação, QA, revisão e documentação.` };
-  return { agente: "orquestrador", instrucao: "Trate os pontos levantados pelo Operador antes do G3." };
+    return { agente: papeis.orquestracao, instrucao: `Spec e design de ${feature} aprovados (G1 e G2). Execute a feature até deixar o G3 pronto: tasks, execução, QA, revisão e documentação.` };
+  return { agente: papeis.orquestracao, instrucao: "Trate os pontos levantados pelo Operador antes do G3." };
 }
 
 export const AGENTES_PADRAO = [
@@ -376,11 +380,12 @@ export const AGENTES_PADRAO = [
 // ---------- caminhos editáveis na configuração ----------
 export const CONFIG_PATHS: RegExp[] = [
   /^AGENTS\.md$/,
+  /^AGENTS\.tipo\.md$/,
   /^CLAUDE\.md$/,
   /^\.squad\/(squad|members)\.yaml$/,
   /^\.claude\/agents\/[a-z][a-z0-9-]*\.md$/,
   /^\.claude\/skills\/[a-z][a-z0-9-]*\/SKILL\.md$/,
-  /^docs\/naming-convention\.md$/,
+  /^docs\/(naming-convention|arquitetura|marca|produto|oferta|politicas)\.md$/,
 ];
 
 export function isEditablePath(p: string): boolean {
@@ -460,6 +465,8 @@ export type SituacaoInput = {
   rodando: { agente: string; desde: string; fila: boolean } | null;
   ultima: { agente: string; ok: boolean; resumo: string } | null;
   tarefas: { status: string }[];
+  /** Agentes de cada papel no tipo da squad (padrão: tipo dados). */
+  papeis?: PapeisFluxo;
 };
 
 const RE_BLOQUEIO = /decis[aã]o necess[aá]ria|bloquead|para destravar|preciso que (voc[eê]|o operador)|aguardando (o )?operador|precisa(mos)? do operador|o que preciso/i;
@@ -500,7 +507,7 @@ export function situacao(i: SituacaoInput): Situacao {
   if (g.g3 === "aguardando")
     return { tipo: "voce", titulo: "Aprove a produção (G3)", detalhe: "QA e revisor aprovaram. Aprovar mescla o PR na branch principal.", acao: "g3" };
 
-  const passo = nextStep(g, i.feature);
+  const passo = nextStep(g, i.feature, i.papeis);
   const bloqueadas = i.tarefas.filter((t) => t.status === "bloqueado").length;
   const andando = i.tarefas.filter((t) => ["em_andamento", "em_qa", "pendente", "reprovado"].includes(t.status)).length;
   const abertas = i.tarefas.filter((t) => !STATUS_FINAL.includes(t.status)).length;

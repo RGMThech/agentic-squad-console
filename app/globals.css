@@ -512,3 +512,17 @@ code, pre, kbd { font-family: var(--mono); font-size: 0.9em; }
 .tarefa-decidir summary { cursor: pointer; color: var(--blue); font-weight: 600; }
 .tarefa-decidir .form { margin-top: 8px; padding: 12px; background: #fafcfe; border: 1px solid var(--line); border-radius: 10px; gap: 10px; }
 .tarefa-nota { margin-top: 4px; max-width: 280px; }
+
+/* ---------- tipos de squad ---------- */
+.tipos-squad { border: 0; padding: 0; margin: 0; min-width: 0; }
+.tipos-squad legend { font-weight: 600; font-size: 13.5px; margin-bottom: 6px; padding: 0; }
+.tipos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.tipo-card { display: flex; gap: 10px; align-items: flex-start; padding: 12px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface); cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+.tipo-card:hover { border-color: var(--blue); }
+.tipo-card.ativo { border-color: var(--blue); background: var(--blue-50); box-shadow: 0 0 0 1px var(--blue) inset; }
+.tipo-card input { position: absolute; opacity: 0; pointer-events: none; }
+.tipo-card:has(input:focus-visible) { outline: 2px solid var(--blue); outline-offset: 2px; }
+.tipo-ic { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 8px; background: var(--blue-50); color: var(--blue-700); }
+.tipo-card.ativo .tipo-ic { background: var(--blue); color: #fff; }
+.tipo-txt { display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; line-height: 1.35; }
+.badge-tipo { display: inline-flex; align-items: center; gap: 5px; }

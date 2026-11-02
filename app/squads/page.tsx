@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { IconLayers, IconPlus } from "@/components/Icons";
+import { IconeTipo, IconLayers, IconPlus } from "@/components/Icons";
 import { PageHead } from "@/components/Shell";
 import { ago } from "@/lib/format";
 import { errMsg } from "@/lib/github";
 import { requireUser } from "@/lib/session";
 import { listSquads, type SquadSummary } from "@/lib/squad";
+import { nomeDoTipo, TIPOS_CONHECIDOS } from "@/lib/tipo";
 
 export const metadata = { title: "Squads" };
 
@@ -53,7 +54,7 @@ export default async function SquadsPage() {
             <h2>Nenhuma squad por aqui</h2>
             <p className="muted" style={{ margin: "8px auto 20px", maxWidth: 480 }}>
               {user.isAdmin
-                ? "Crie a primeira squad a partir do template."
+                ? "Crie a primeira squad: dados, software, marketing, produto, IA, vendas ou atendimento."
                 : "Você ainda não faz parte da equipe de nenhuma squad. Peça a um operador para incluir seu e-mail."}
             </p>
             {user.isAdmin && (
@@ -72,8 +73,11 @@ export default async function SquadsPage() {
                 <span className="badge">{s.private ? "Privado" : "Público"}</span>
               </div>
               <h3>{s.repo}</h3>
+              <span className="badge badge-tipo" style={{ alignSelf: "flex-start" }}>
+                <IconeTipo icone={TIPOS_CONHECIDOS[s.tipo]?.icone ?? "layers"} size={13} /> {nomeDoTipo(s.tipo)}
+              </span>
               <p className="muted small" style={{ minHeight: 40 }}>
-                {s.description || "Squad agêntica de Data Analytics"}
+                {s.description || `Squad agêntica de ${nomeDoTipo(s.tipo)}`}
               </p>
               <p className="xs muted">Atualizado {ago(s.updatedAt)}</p>
             </Link>

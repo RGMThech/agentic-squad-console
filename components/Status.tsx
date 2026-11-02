@@ -24,14 +24,17 @@ export function GatesMini({ gates }: { gates: { g1: GateState; g2: GateState; g3
 export function GateTrack({
   gates,
   running,
+  rotulos = { g1: "Spec", g2: "Design", g3: "Produção" },
 }: {
   gates: { g1: GateState; g2: GateState; g3: GateState };
   running: boolean;
+  /** Nome dos gates no tipo da squad (.squad/tipo.yaml). */
+  rotulos?: { g1: string; g2: string; g3: string };
 }) {
   const steps = [
-    { k: "g1" as const, t: "G1 · Spec" },
-    { k: "g2" as const, t: "G2 · Design" },
-    { k: "g3" as const, t: "G3 · Produção" },
+    { k: "g1" as const, t: `G1 · ${rotulos.g1}` },
+    { k: "g2" as const, t: `G2 · ${rotulos.g2}` },
+    { k: "g3" as const, t: `G3 · ${rotulos.g3}` },
   ];
   return (
     <div className="track" role="list" aria-label="Gates da feature">

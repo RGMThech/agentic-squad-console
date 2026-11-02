@@ -1,4 +1,4 @@
-import { arquivosDaFeature, completarLocais, lerBytes, objetosDosContratos, refDaFeature, ROTULO_CATEGORIA, type ArquivoEntrega, type Categoria } from "@/lib/entrega";
+import { arquivosDaFeature, categoriasDaEntrega, completarLocais, lerBytes, objetosDosContratos, refDaFeature, type ArquivoEntrega } from "@/lib/entrega";
 import type { Feature, SquadContext } from "@/lib/squad";
 import { IconExternal, IconFile } from "./Icons";
 import { Markdown } from "./Markdown";
@@ -32,7 +32,12 @@ export async function EntregaView({ ctx, f, base }: { ctx: SquadContext; f: Feat
     arquivos.filter((a) => a.categoria === "contratos" && /\.ya?ml$/.test(a.path)).map(async (a) => ({ path: a.path, texto: ((await lerBytes(ctx, a.path, ref)) ?? Buffer.alloc(0)).toString("utf8") })),
   );
   const objetos = completarLocais(objetosDosContratos(contratos), [f.entrega?.body, f.design?.body, f.tasksDoc?.body].filter(Boolean).join("\n"));
-  const grupos = (Object.keys(ROTULO_CATEGORIA) as Categoria[]).map((c) => ({ c, itens: arquivos.filter((a) => a.categoria === c) })).filter((g) => g.itens.length);
+  const grupos = categoriasDaEntrega(ctx.tipo.pastas)
+    .map((g) => ({ c: g.chave, rotulo: g.rotulo, itens: arquivos.filter((a) => a.categoria === g.chave) }))
+    .filter((g) => g.itens.length);
+  // objetos na plataforma só fazem sentido em squads com contratos de dados
+  const temContratos = ctx.tipo.pastas.some((p) => p.prefixo === "contracts/") || objetos.length > 0;
+  const doc = ctx.tipo.papeis.documentacao;
   const entregue = f.gates.g3 === "aprovado";
   const contratoUrl = (p: string) => arquivos.find((a) => a.path === p)?.url;
 
@@ -60,9 +65,10 @@ export async function EntregaView({ ctx, f, base }: { ctx: SquadContext; f: Feat
       </div>
       <p className="xs muted">
         O dossiê junta pedido, spec, design, tarefas, QA, revisão, entrega e documentação num arquivo só. O .zip traz o dossiê, cada documento em PDF, DOCX, TXT e MD e
-        todos os arquivos (pipelines, contratos, testes) como estão no repositório.
+        todos os arquivos produzidos como estão no repositório.
       </p>
 
+      {temContratos && (
       <section className="stack-sm">
         <h3>Objetos na plataforma</h3>
         {objetos.length ? (
@@ -105,27 +111,28 @@ export async function EntregaView({ ctx, f, base }: { ctx: SquadContext; f: Feat
             </table>
           </div>
         ) : (
-          <p className="small muted">Nenhum contrato de dados nesta feature ainda. Os objetos aparecem aqui quando o arquiteto cria os contratos.</p>
+          <p className="small muted">Nenhum contrato de dados nesta feature ainda. Os objetos aparecem aqui quando o {ctx.tipo.papeis.design} cria os contratos.</p>
         )}
       </section>
+      )}
 
       {f.entrega ? (
         <details className="entrega-md" open={entregue}>
           <summary>
-            <b>Relatório de entrega</b> <span className="xs muted">(entrega.md, gerado pela governança)</span>
+            <b>Relatório de entrega</b> <span className="xs muted">(entrega.md, gerado pelo {doc})</span>
           </summary>
           <Markdown>{f.entrega.body}</Markdown>
         </details>
       ) : (
         <p className="xs muted">
-          O relatório de entrega (<span className="mono">entrega.md</span>) é gerado pelo agente de governança no fim da feature, com o local de cada objeto e como executar.
+          O relatório de entrega (<span className="mono">entrega.md</span>) é gerado pelo <b>{doc}</b> no fim da feature, com tudo o que foi entregue, onde está e como usar.
         </p>
       )}
 
       {grupos.map((g) => (
         <section key={g.c} className="stack-sm">
           <h3>
-            {ROTULO_CATEGORIA[g.c]} <span className="badge">{g.itens.length}</span>
+            {g.rotulo} <span className="badge">{g.itens.length}</span>
           </h3>
           <ul className="arquivos">
             {g.itens.map((a) => (

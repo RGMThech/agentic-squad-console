@@ -12,6 +12,7 @@ import { requireUser } from "./session";
 import { isRunning, listFeatureIds, listRuns, listSquadPRs, loadFeature, loadSquad, prChecks, secretStatus, type SquadContext } from "./squad";
 import { normalizeConexao, parseLeitura, setDadosYaml, testConnection, validateDados, validateSegredos, type Check } from "./dados";
 import { ehPlataforma, PLATAFORMAS, type DadosConfig } from "./dados-meta";
+import { dicasPedido, nomeDoTipo, parseBaseTipos, planejarTipo, topicoDoTipo } from "./tipo";
 import {
   RE_AGENT,
   applyAnswers,
@@ -98,15 +99,16 @@ export async function createFeature(_: ActionState, fd: FormData): Promise<Actio
     const titulo = str(fd, "titulo", 120);
     const problema = str(fd, "problema", 3000);
     if (titulo.length < 4) return { error: "Dê um título com pelo menos 4 caracteres." };
-    if (problema.length < 20) return { error: "Descreva o problema de negócio com um pouco mais de detalhe." };
+    if (problema.length < 20) return { error: "Descreva o problema ou objetivo com um pouco mais de detalhe." };
     const ids = (await listFeatureIds(ctx)).map((f) => f.id);
     const feature = nextFeatureId(ids, titulo);
+    const dicas = dicasPedido(ctx.tipo.tipo);
     const campos: [string, string][] = [
       ["Título", titulo],
-      ["Problema de negócio", problema],
+      ["Problema ou objetivo", problema],
       ["Quem usa", str(fd, "publico", 600)],
-      ["Decisão que será tomada", str(fd, "decisao", 600)],
-      ["Fontes conhecidas", str(fd, "fontes", 800)],
+      [dicas.decisao.rotulo, str(fd, "decisao", 600)],
+      [dicas.fontes.rotulo, str(fd, "fontes", 800)],
       ["Prazo / SLA", str(fd, "sla", 300)],
       ["Observações", str(fd, "obs", 1200)],
     ];
@@ -117,7 +119,7 @@ export async function createFeature(_: ActionState, fd: FormData): Promise<Actio
     // o pedido original fica registrado na branch da feature: dá para relê-lo a qualquer momento
     await gravarPedido(ctx, feature, titulo, campos);
     const instrucao = `Crie a spec da feature ${feature} (specs/${feature}/spec.md, id ${feature.slice(0, 3)}) a partir deste pedido de ${quem(ctx)}, registrado em specs/${feature}/pedido.md (não altere esse arquivo). Liste todas as dúvidas em "Dúvidas abertas" e deixe status: em_revisao.\n\n${pedido}`;
-    await dispatch(ctx, "analista-requisitos", feature, instrucao);
+    await dispatch(ctx, ctx.tipo.papeis.especificacao, feature, instrucao);
     destino = `${base(ctx)}/f/${feature}?novo=1`;
   } catch (e) {
     return { error: errMsg(e) };
@@ -216,11 +218,11 @@ export async function decidirTarefa(_: ActionState, fd: FormData): Promise<Actio
 
     let extra = "";
     if (intent === "reexecutar") {
-      await dispatch(ctx, "orquestrador", feature, `O Operador ${quem(ctx)} pediu para reexecutar a tarefa ${tarefa} da feature ${feature}.\n\nO que precisa ser feito ou corrigido: ${justificativa}\n\nDespache o agente responsável, passe pelo QA, atualize tasks.md e a documentação afetada. Não mexa em tarefas marcadas como nao_executar ou resolvido_fora.`);
+      await dispatch(ctx, ctx.tipo.papeis.orquestracao, feature, `O Operador ${quem(ctx)} pediu para reexecutar a tarefa ${tarefa} da feature ${feature}.\n\nO que precisa ser feito ou corrigido: ${justificativa}\n\nDespache o agente responsável, passe pelo QA, atualize tasks.md e a documentação afetada. Não mexa em tarefas marcadas como nao_executar ou resolvido_fora.`);
       extra = " Orquestrador acionado.";
     } else if (fd.get("docs") === "on" && intent !== "pendente") {
-      await dispatch(ctx, "governanca-docs", feature, `O Operador ${quem(ctx)} decidiu que a tarefa ${tarefa} da feature ${feature} ${decisao}. Motivo: ${justificativa}\n\nAtualize specs/${feature}/entrega.md (seção de tarefas não executadas ou resolvidas de outra forma, com a justificativa) e a documentação afetada (catálogo, lineage). Não altere pipelines.`);
-      extra = " Governança acionada para atualizar a documentação.";
+      await dispatch(ctx, ctx.tipo.papeis.documentacao, feature, `O Operador ${quem(ctx)} decidiu que a tarefa ${tarefa} da feature ${feature} ${decisao}. Motivo: ${justificativa}\n\nAtualize specs/${feature}/entrega.md (seção de tarefas não executadas ou resolvidas de outra forma, com a justificativa) e a documentação afetada. Não altere o que foi produzido pelos outros agentes.`);
+      extra = ` ${ctx.tipo.papeis.documentacao} acionado para atualizar a documentação.`;
     }
     await (await store()).audit({ actor: ctx.user.email, action: "tarefa.decidir", target: `${ctx.owner}/${ctx.repo} ${feature} ${tarefa}: ${decisao}` });
     revalidatePath(`${base(ctx)}/f/${feature}`);
@@ -230,15 +232,15 @@ export async function decidirTarefa(_: ActionState, fd: FormData): Promise<Actio
   }
 }
 
-/** Pede à governança que atualize entrega.md e a documentação com o estado atual das tarefas. */
+/** Pede ao agente de documentação que atualize entrega.md e a documentação com o estado atual das tarefas. */
 export async function atualizarDocumentacao(_: ActionState, fd: FormData): Promise<ActionState> {
   try {
     const ctx = await ctxFrom(fd, "aprovar");
     const feature = str(fd, "feature", 80);
     await featureEditavel(ctx, feature);
-    await dispatch(ctx, "governanca-docs", feature, `Atualize a documentação da feature ${feature} com o estado atual: specs/${feature}/entrega.md (objetos, onde estão, tarefas concluídas, não executadas e resolvidas de outra forma, com as justificativas de "Decisões sobre tarefas"), catálogo e lineage.`);
+    await dispatch(ctx, ctx.tipo.papeis.documentacao, feature, `Atualize a documentação da feature ${feature} com o estado atual: specs/${feature}/entrega.md (tudo o que foi entregue e onde está, tarefas concluídas, não executadas e resolvidas de outra forma, com as justificativas de "Decisões sobre tarefas") e a documentação do tipo de squad (AGENTS.tipo.md).`);
     revalidatePath(`${base(ctx)}/f/${feature}`);
-    return { ok: true, message: "Governança acionada para atualizar a documentação." };
+    return { ok: true, message: `${ctx.tipo.papeis.documentacao} acionado para atualizar a documentação.` };
   } catch (e) {
     return { error: errMsg(e) };
   }
@@ -277,7 +279,7 @@ export async function reabrirFeature(_: ActionState, fd: FormData): Promise<Acti
     // a rodada nova vira uma tarefa pendente: o G3 só volta a ficar pronto quando ela for encerrada
     const nova = adicionarTarefa(novo, {
       tarefa: `Rodada reaberta em ${todaySaoPaulo()}: ${tipo === "spec" ? "mudança na especificação — " : ""}${motivo}`,
-      agente: "orquestrador",
+      agente: ctx.tipo.papeis.orquestracao,
       criterio: "ajustes feitos, QA e revisão aprovados, entrega.md atualizado",
     });
     novo = nova.texto;
@@ -295,7 +297,7 @@ export async function reabrirFeature(_: ActionState, fd: FormData): Promise<Acti
       destino = `${base(ctx)}/f/${feature}/spec`;
     } else {
       if (fd.get("acionar") === "on")
-        await dispatch(ctx, "orquestrador", feature, `A feature ${feature} foi reaberta pelo Operador ${quem(ctx)} depois do G3.\n\nO que fazer: ${motivo}\n\nRevise tasks.md: reexecute o que estiver pendente, crie tarefas novas (próximo T-xx) para os ajustes pedidos e não mexa nas marcadas nao_executar ou resolvido_fora. Passe por QA, revisão e governança (atualizando entrega.md) até o G3 ficar pronto de novo.`);
+        await dispatch(ctx, ctx.tipo.papeis.orquestracao, feature, `A feature ${feature} foi reaberta pelo Operador ${quem(ctx)} depois do G3.\n\nO que fazer: ${motivo}\n\nRevise tasks.md: reexecute o que estiver pendente, crie tarefas novas (próximo T-xx) para os ajustes pedidos e não mexa nas marcadas nao_executar ou resolvido_fora. Passe por QA, revisão e documentação (atualizando entrega.md) até o G3 ficar pronto de novo.`);
       destino = `${base(ctx)}/f/${feature}?aba=tarefas`;
     }
   } catch (e) {
@@ -333,7 +335,7 @@ export async function editSpec(_: ActionState, fd: FormData): Promise<ActionStat
     const design = await reabrirDesign(ctx, f, feature, `spec alterada para v${versao}`);
     await comment(ctx, f.pr?.number, `✏️ **Spec alterada pelo Operador** (${quem(ctx)}) — v${versao}\n\n> ${motivo}\n\n${estavaAprovada ? "O G1 foi reaberto" : "A spec segue em revisão"}${design ? " e o G2 também (o design precisa refletir a mudança)" : ""}.`);
     if (fd.get("conferir") === "on")
-      await dispatch(ctx, "analista-requisitos", feature, `O Operador ${quem(ctx)} editou a spec de ${feature} diretamente (agora v${versao}). Motivo: ${motivo}\n\nConfira a consistência da spec inteira com a alteração (regras, métricas, critérios de aceite), registre a decisão em "Decisões" e liste em "Dúvidas abertas" só o que precisar de confirmação, incluindo impactos no design e em tarefas já implementadas. Não desfaça a alteração do Operador. Mantenha versao ${versao} e status: em_revisao.`);
+      await dispatch(ctx, ctx.tipo.papeis.especificacao, feature, `O Operador ${quem(ctx)} editou a spec de ${feature} diretamente (agora v${versao}). Motivo: ${motivo}\n\nConfira a consistência da spec inteira com a alteração (todas as seções e os critérios de aceite), registre a decisão em "Decisões" e liste em "Dúvidas abertas" só o que precisar de confirmação, incluindo impactos no design e em tarefas já implementadas. Não desfaça a alteração do Operador. Mantenha versao ${versao} e status: em_revisao.`);
     await (await store()).audit({ actor: ctx.user.email, action: "spec.editar", target: `${ctx.owner}/${ctx.repo} ${feature} v${versao}` });
     destino = `${base(ctx)}/f/${feature}`;
   } catch (e) {
@@ -355,7 +357,7 @@ export async function askSpecChange(_: ActionState, fd: FormData): Promise<Actio
     await comment(ctx, f.pr?.number, `✏️ **Mudança na spec pedida** por ${quem(ctx)}:\n\n${pedido}`);
     await dispatch(
       ctx,
-      "analista-requisitos",
+      ctx.tipo.papeis.especificacao,
       feature,
       `O Operador ${quem(ctx)} pediu uma mudança na especificação de ${feature}${aprovada ? " (que estava aprovada no G1: a mudança reabre o G1)" : ""}. Atualize spec.md, incremente versao, registre em "Decisões" e em "Histórico de alterações", deixe status: em_revisao e liste em "Dúvidas abertas" o que precisar de confirmação (incluindo impactos no design e em tarefas já feitas).\n\nMudança pedida:\n${pedido}`,
     );
@@ -425,9 +427,9 @@ export async function approveGate(_: ActionState, fd: FormData): Promise<ActionS
       const [agente, instrucao] =
         gate === "G1"
           ? f.design
-            ? ["arquiteto-dados", `A spec de ${feature} mudou e foi reaprovada no G1 (v${f.spec?.data.versao ?? "?"}) por ${quem(ctx)}. Revise specs/${feature}/design.md, os contratos e ADRs para refletir a spec atual (veja "Histórico de alterações" e "Decisões"), registre o que mudou e deixe status: em_revisao.`]
-            : ["arquiteto-dados", `A spec de ${feature} foi aprovada no G1 por ${quem(ctx)}. Produza specs/${feature}/design.md, os contratos e ADRs necessários e deixe status: em_revisao.`]
-          : ["orquestrador", `Spec e design de ${feature} aprovados (G2 por ${quem(ctx)}). Gere tasks.md e conduza implementação, QA, revisão e documentação até o G3 ficar pronto.`];
+            ? [ctx.tipo.papeis.design, `A spec de ${feature} mudou e foi reaprovada no G1 (v${f.spec?.data.versao ?? "?"}) por ${quem(ctx)}. Revise specs/${feature}/design.md e os artefatos de design para refletir a spec atual (veja "Histórico de alterações" e "Decisões"), registre o que mudou e deixe status: em_revisao.`]
+            : [ctx.tipo.papeis.design, `A spec de ${feature} foi aprovada no G1 por ${quem(ctx)}. Produza specs/${feature}/design.md e os artefatos de design previstos em AGENTS.tipo.md e deixe status: em_revisao.`]
+          : [ctx.tipo.papeis.orquestracao, `Spec e design de ${feature} aprovados (G2 por ${quem(ctx)}). Gere tasks.md e conduza a execução, QA, revisão e documentação até o G3 ficar pronto.`];
       await dispatch(ctx, agente, feature, instrucao);
       extra = ` ${agente} acionado.`;
     }
@@ -445,7 +447,7 @@ export async function requestChanges(_: ActionState, fd: FormData): Promise<Acti
     const gate = str(fd, "gate", 3);
     const feedback = str(fd, "feedback", 5000);
     if (feedback.length < 5) return { error: "Escreva o que precisa mudar." };
-    const agente = gate === "G1" ? "analista-requisitos" : gate === "G2" ? "arquiteto-dados" : "orquestrador";
+    const agente = gate === "G1" ? ctx.tipo.papeis.especificacao : gate === "G2" ? ctx.tipo.papeis.design : ctx.tipo.papeis.orquestracao;
     const prs = await listSquadPRs(ctx);
     const f = await loadFeature(ctx, feature, true, prs);
     await comment(ctx, f.pr?.number, `🧍 **Ajustes solicitados no ${gate}** por ${quem(ctx)}:\n\n${feedback}`);
@@ -719,6 +721,8 @@ export async function createSquad(_: ActionState, fd: FormData): Promise<ActionS
     const descricao = str(fd, "descricao", 300);
     const plataforma = str(fd, "plataforma", 30) || "agnostico";
     const modelo = str(fd, "modelo", 60) || "sonnet";
+    const tipo = str(fd, "tipo", 40) || "dados";
+    if (!/^[a-z][a-z0-9-]{1,30}$/.test(tipo)) return { error: "Tipo de squad inválido." };
     if (!RE_NAME.test(nome) || nome.length < 3) return { error: "Nome do repositório inválido (mínimo 3 caracteres: letras, números e hífen)." };
     const [tOwner, tRepo] = templateRepo.split("/");
     if (!tOwner || !tRepo) return { error: `Template inválido ("${templateRepo}") na conexão ${owner}. Use o formato dono/repositorio em Admin → Conexões.` };
@@ -754,7 +758,7 @@ export async function createSquad(_: ActionState, fd: FormData): Promise<ActionS
         owner,
         name: nome,
         private: true,
-        description: descricao || `Squad agêntica de Data Analytics — ${cliente || nome}`,
+        description: descricao || `Squad agêntica de ${nomeDoTipo(tipo)} — ${cliente || nome}`,
       });
     } catch (e) {
       console.error("[nova squad] createUsingTemplate:", errDetail(e), e);
@@ -775,11 +779,30 @@ export async function createSquad(_: ActionState, fd: FormData): Promise<ActionS
     let etapa = "ler o repositório criado";
     try {
       const repoInfo = (await o.repos.get({ owner, repo: nome })).data;
-      etapa = "adicionar o tópico";
-      await o.repos.replaceAllTopics({ owner, repo: nome, names: [env.topic] });
+      const branch = repoInfo.default_branch;
+
+      // tipo da squad: o catálogo vem do próprio template (tipos/base.yaml); template sem catálogo só tem o tipo dados
+      etapa = "ler o catálogo de tipos do template";
+      const base = parseBaseTipos((await readFile(o, owner, nome, "tipos/base.yaml", branch).catch(() => null))?.content);
+      if (!base && tipo !== "dados")
+        return { error: `O repositório ${owner}/${nome} foi criado, mas o template ${templateRepo} não tem tipos de squad (tipos/base.yaml). Atualize o template ou crie uma squad de Data Analytics.` };
+      if (base && !base.tipos.some((t) => t.id === tipo))
+        return { error: `O repositório ${owner}/${nome} foi criado, mas o template não tem o tipo "${tipo}". Tipos disponíveis: ${base.tipos.map((t) => t.id).join(", ")}.` };
+
+      etapa = "ler os arquivos do template";
+      const head = (await o.git.getRef({ owner, repo: nome, ref: `heads/${branch}` })).data.object.sha;
+      const commit = (await o.git.getCommit({ owner, repo: nome, commit_sha: head })).data;
+      const arvore = (await o.git.getTree({ owner, repo: nome, tree_sha: commit.tree.sha, recursive: "true" })).data;
+      if (arvore.truncated) return { error: `O repositório ${owner}/${nome} foi criado, mas o template é grande demais para aplicar o tipo de uma vez. Rode scripts/instanciar_tipo.py ${tipo} no repositório.` };
+      const blobs = new Map(arvore.tree.filter((e) => e.type === "blob" && e.path && e.sha).map((e) => [e.path!, { sha: e.sha!, mode: e.mode ?? "100644" }]));
+      const plano = base ? planejarTipo([...blobs.keys()], base, tipo) : { apagar: [], copiar: {} as Record<string, string> };
+
       // edita o squad.yaml do template preservando comentários e blocos (ex.: "dados")
+      etapa = "montar .squad/squad.yaml";
       const YAML = await import("yaml");
-      const doc = YAML.parseDocument(squadYaml.content || "");
+      const origemCfg = plano.copiar[".squad/squad.yaml"];
+      const textoCfg = origemCfg ? (await readFile(o, owner, nome, origemCfg, branch))?.content ?? squadYaml.content : squadYaml.content;
+      const doc = YAML.parseDocument(textoCfg || "");
       if (!doc.contents) doc.contents = doc.createNode({}) as never;
       doc.set("nome", str(fd, "titulo", 120) || nome);
       doc.set("cliente", cliente);
@@ -787,7 +810,7 @@ export async function createSquad(_: ActionState, fd: FormData): Promise<ActionS
       doc.set("plataforma", ehPlataforma(plataforma) ? plataforma : "agnostico");
       doc.set("modelo", modelo);
       doc.set("console_bot", await appBotLogin(owner));
-      const usaDbt = fd.get("dbt") === "on";
+      const usaDbt = tipo === "dados" && fd.get("dbt") === "on";
       if (ehPlataforma(plataforma) || usaDbt) {
         const dados = doc.get("dados");
         if (dados && YAML.isMap(dados)) {
@@ -797,23 +820,34 @@ export async function createSquad(_: ActionState, fd: FormData): Promise<ActionS
           doc.set("dados", { plataforma: ehPlataforma(plataforma) ? plataforma : "", conexao: {}, leitura: [], escrita: "", dbt: usaDbt });
         }
       }
-      const cfg = String(doc);
-      etapa = "gravar .squad/squad.yaml";
-      await writeFile(o, {
-        owner, repo: nome, path: ".squad/squad.yaml", branch: repoInfo.default_branch,
-        sha: squadYaml.sha, content: cfg, message: "config: dados da squad",
+
+      // um único commit: aplica o pacote do tipo, grava a configuração e o operador inicial
+      etapa = "aplicar o tipo da squad";
+      type Entrada = { path: string; mode: "100644" | "100755"; type: "blob"; sha?: string | null; content?: string };
+      const modo = (m: string): "100644" | "100755" => (m === "100755" ? "100755" : "100644");
+      const escritos = new Set([".squad/squad.yaml", ".squad/members.yaml"]);
+      const entradas: Entrada[] = [
+        ...plano.apagar.filter((p) => !escritos.has(p)).map((p) => ({ path: p, mode: modo(blobs.get(p)?.mode ?? ""), type: "blob" as const, sha: null })),
+        ...Object.entries(plano.copiar)
+          .filter(([destino]) => !escritos.has(destino))
+          .map(([destino, origem]) => ({ path: destino, mode: modo(blobs.get(origem)!.mode), type: "blob" as const, sha: blobs.get(origem)!.sha })),
+        { path: ".squad/squad.yaml", mode: "100644", type: "blob", content: String(doc) },
+        { path: ".squad/members.yaml", mode: "100644", type: "blob", content: serializeMembers({ operadores: [user.email], membros: [], leitores: [] }) },
+      ];
+      const tree = await o.git.createTree({ owner, repo: nome, base_tree: commit.tree.sha, tree: entradas });
+      const nomeTipo = base?.tipos.find((t) => t.id === tipo)?.nome ?? nomeDoTipo(tipo);
+      const novo = await o.git.createCommit({
+        owner, repo: nome, tree: tree.data.sha, parents: [head],
+        message: `squad: tipo ${nomeTipo}, configuração e operador inicial (${user.email})`,
       });
-      etapa = "gravar .squad/members.yaml";
-      const mem = await readFile(o, owner, nome, ".squad/members.yaml");
-      await writeFile(o, {
-        owner, repo: nome, path: ".squad/members.yaml", branch: repoInfo.default_branch, sha: mem?.sha,
-        message: `config: operador inicial (${user.email})`,
-        content: serializeMembers({ operadores: [user.email], membros: [], leitores: [] }),
-      });
+      await o.git.updateRef({ owner, repo: nome, ref: `heads/${branch}`, sha: novo.data.sha });
+
+      etapa = "adicionar os tópicos";
+      await o.repos.replaceAllTopics({ owner, repo: nome, names: [env.topic, topicoDoTipo(tipo)] });
     } catch (e) {
       return { error: `O repositório ${owner}/${nome} foi criado, mas falhou ao ${etapa}: ${errMsg(e)}. Conclua em Configuração ou ajuste direto no GitHub.` };
     }
-    await (await store()).audit({ actor: user.email, action: "squad.criar", target: `${owner}/${nome}` });
+    await (await store()).audit({ actor: user.email, action: "squad.criar", target: `${owner}/${nome} (${tipo})` });
     destino = `/s/${owner}/${nome}/config?nova=1`;
   } catch (e) {
     return { error: errMsg(e) };
@@ -946,14 +980,14 @@ export async function answerDoubts(_: ActionState, fd: FormData): Promise<Action
     const instrucao = `O Operador ${quem(ctx)} respondeu ${respondidas.length} dúvida(s) da spec ${feature}. As respostas estão registradas em "Dúvidas abertas" como "Resposta do Operador".
 
 Faça uma rodada de revisão da spec:
-1. Para cada dúvida respondida: incorpore a resposta nas regras de negócio, métricas e critérios de aceite; registre a decisão na seção "Decisões" (data, decisão e quem decidiu: ${ctx.user.email}); marque a dúvida como resolvida ("- [x]") ou remova-a de "Dúvidas abertas".
+1. Para cada dúvida respondida: incorpore a resposta nas seções da spec e nos critérios de aceite; registre a decisão na seção "Decisões" (data, decisão e quem decidiu: ${ctx.user.email}); marque a dúvida como resolvida ("- [x]") ou remova-a de "Dúvidas abertas".
 2. Reavalie as dúvidas ainda sem resposta${pendentes.length ? ` (${pendentes.length})` : ""}: se alguma já foi esclarecida pelas respostas, resolva e registre em "Decisões" citando a resposta que a esclareceu.
 3. Se as respostas levantarem novas questões ou contradições, adicione novas dúvidas "- [ ]", claras e objetivas.
 4. Mantenha status: em_revisao e incremente "versao" no front matter.
 
 Respostas desta rodada:
 ${lista}`;
-    await dispatch(ctx, "analista-requisitos", feature, instrucao);
+    await dispatch(ctx, ctx.tipo.papeis.especificacao, feature, instrucao);
     await comment(ctx, f.pr?.number, `🧍 ${quem(ctx)} respondeu ${respondidas.length} dúvida(s) da spec e enviou ao analista para reprocessar.`);
     revalidatePath(`${base(ctx)}/f/${feature}`);
     return { ok: true, message: "Respostas enviadas. O analista vai reprocessar a spec; novas dúvidas, se houver, aparecem aqui." };

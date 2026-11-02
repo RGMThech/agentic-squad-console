@@ -1,6 +1,6 @@
 # Squad Console · RGM Tech
 
-Console web para **configurar e operar squads agênticas de Data Analytics**, onde um único humano (o Operador) comanda uma squad inteira de agentes.
+Console web para **configurar e operar squads agênticas** — Data Analytics, Desenvolvimento de Software, Marketing, Produto, IA e Machine Learning, Vendas e pré-vendas, Atendimento / CX — onde um único humano (o Operador) comanda uma squad inteira de agentes, por feature e por tarefa.
 
 Funciona junto com o template [`agentic-data-squad`](https://github.com/RGMThech/agentic-data-squad).
 
@@ -11,7 +11,8 @@ Funciona junto com o template [`agentic-data-squad`](https://github.com/RGMThech
 | **Acesso** | Landing page pública. Login por e-mail com código de uso único. Contas só por convite. |
 | **Usuários** | Convidar, mudar papel (administrador ou usuário), desativar e encerrar sessões. Trilha de auditoria. |
 | **Conexões** | Várias organizações do GitHub no mesmo console (a sua e as de clientes), pelo App do console ou por um App próprio do cliente, cada uma com o próprio template. |
-| **Squads** | Criar squad a partir do template, na organização escolhida. Cada pessoa vê só as squads em que está na equipe. |
+| **Squads** | Criar squad escolhendo o tipo (o catálogo vem de `tipos/base.yaml` do template), na organização escolhida, num único commit com o pacote do tipo. Cada pessoa vê só as squads em que está na equipe. |
+| **Tipos de squad** | Rótulos dos gates, agentes de cada papel e grupos da entrega vêm do `.squad/tipo.yaml` da squad; squads antigas, sem esse arquivo, são de Data Analytics. |
 | **Equipe** | Operadores, membros e leitores por e-mail, gravados no `.squad/members.yaml` da squad. |
 | **Features e gates** | Abrir pedidos, acompanhar os agentes, aprovar G1 e G2, pedir ajustes, aprovar G3 (merge). |
 | **Custos** | Custo, turnos e duração por execução, por agente, por feature e por mês. |

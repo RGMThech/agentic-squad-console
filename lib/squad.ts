@@ -25,6 +25,7 @@ import {
   type Task,
 } from "./core";
 import type { User } from "./session";
+import { parseTipo, tipoDosTopicos, type TipoSquad } from "./tipo";
 
 export type SquadSummary = {
   owner: string;
@@ -33,6 +34,8 @@ export type SquadSummary = {
   description: string | null;
   updatedAt: string | null;
   defaultBranch: string;
+  /** Tipo da squad (pelo tópico squad-tipo-<tipo> do repositório). */
+  tipo: string;
 };
 
 export type SquadConfig = {
@@ -55,6 +58,8 @@ export type SquadContext = {
   private: boolean;
   htmlUrl: string;
   config: SquadConfig;
+  /** Tipo da squad (.squad/tipo.yaml): rótulos dos gates, agentes de cada papel, pastas da entrega. */
+  tipo: TipoSquad;
   members: Members;
   role: Role;
   user: User;
@@ -143,6 +148,7 @@ export async function listSquads(user: User): Promise<{ squads: SquadSummary[]; 
       description: r.description,
       updatedAt: r.updated_at ?? null,
       defaultBranch: r.default_branch,
+      tipo: tipoDosTopicos(r.topics),
     }))
     .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
   if (user.isAdmin) return { squads, falhas };
@@ -204,9 +210,10 @@ export async function loadSquad(user: User, owner: string, repo: string): Promis
     throw e;
   }
   const branch = repoData.default_branch;
-  const [cfg, mem] = await Promise.all([
+  const [cfg, mem, tipo] = await Promise.all([
     readFile(o, owner, repo, ".squad/squad.yaml", branch),
     readFile(o, owner, repo, ".squad/members.yaml", branch),
+    readFile(o, owner, repo, ".squad/tipo.yaml", branch).catch(() => null),
   ]);
   const members = parseMembers(mem?.content ?? null);
   const role = resolveRole(user.email, members, user.isAdmin);
@@ -218,6 +225,7 @@ export async function loadSquad(user: User, owner: string, repo: string): Promis
     private: repoData.private,
     htmlUrl: repoData.html_url,
     config: parseConfig(cfg?.content ?? null, repo),
+    tipo: parseTipo(tipo?.content ?? null),
     members,
     role,
     user,
@@ -408,7 +416,7 @@ export async function apiKeyStatus(ctx: SquadContext): Promise<{ set: boolean; u
 }
 
 /** Estado da feature para a tela: em execução, precisa de você, falhou ou entregue. */
-export function situacaoDaFeature(f: Feature, runs: Run[]): Situacao {
+export function situacaoDaFeature(f: Feature, runs: Run[], papeis?: TipoSquad["papeis"]): Situacao {
   const daFeature = runs.filter((r) => r.feature === f.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const ativa = daFeature.find(isRunning);
   const ultima = daFeature.find((r) => !isRunning(r));
@@ -421,6 +429,7 @@ export function situacaoDaFeature(f: Feature, runs: Run[]): Situacao {
     rodando: ativa ? { agente: ativa.agente, desde: ativa.createdAt, fila: ativa.status === "queued" } : null,
     ultima: ultima ? { agente: ultima.agente, ok: ultima.conclusion === "success" && ultima.record?.status !== "falha", resumo: ultima.resumo } : null,
     tarefas: f.tasks,
+    papeis,
   });
 }
 

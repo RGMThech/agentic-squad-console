@@ -13,6 +13,9 @@ const DICAS: Record<string, string> = {
   ".squad/members.yaml": "Listas de logins do GitHub. Operadores aprovam gates; membros abrem pedidos e acionam agentes; leitores só visualizam. A pessoa também precisa ter acesso ao repositório no GitHub.",
   ".squad/squad.yaml": "modelo: sonnet | opus | haiku · max_turnos limita cada execução · alerta_custo_usd destaca execuções caras.",
   "AGENTS.md": "Toda execução de agente lê este arquivo primeiro. Mudanças aqui mudam o comportamento da squad inteira.",
+  "AGENTS.tipo.md": "Regras deste tipo de squad (papéis, convenções, definição de pronto). Os agentes leem logo depois do AGENTS.md.",
+  "docs/marca.md": "A lista de \"Termos e promessas proibidos\" é usada pelo validador para bloquear peças.",
+  "docs/oferta.md": "A lista de \"Promessas proibidas\" é usada pelo validador para bloquear materiais.",
 };
 
 export default async function EditConfig({ params, searchParams }: { params: SquadParams; searchParams: Promise<{ path?: string; novo?: string }> }) {

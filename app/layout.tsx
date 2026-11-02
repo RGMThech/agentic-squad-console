@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: { default: "Squad Console", template: "%s · Squad Console" },
-  description: "Console de configuração e operação da Squad Agêntica de Data Analytics",
+  description: "Console de configuração e operação de squads agênticas: dados, software, marketing, produto, IA, vendas e atendimento",
   robots: { index: false, follow: false },
 };
 
