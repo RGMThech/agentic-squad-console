@@ -28,6 +28,11 @@ import {
   slugify,
   todaySaoPaulo,
   validateConfigContent,
+  acrescentarNaSecao,
+  adicionarTarefa,
+  definirStatusTarefa,
+  ROTULO_STATUS,
+  STATUS_FINAL,
 } from "./core";
 
 export type ActionState = { ok?: boolean; error?: string; message?: string; url?: string };
@@ -172,11 +177,131 @@ async function featureEditavel(ctx: SquadContext, feature: string) {
   const prs = await listSquadPRs(ctx);
   const f = await loadFeature(ctx, feature, true, prs);
   if (!f.branch) throw new Error("A feature não tem branch ativa.");
-  if (f.pr?.state === "merged") throw new Error("Esta feature já foi entregue (G3). Para mudar o que foi entregue, abra uma nova feature de evolução.");
+  if (f.pr?.state === "merged") throw new Error("Esta feature já foi entregue (G3). Use \"Reabrir a feature\" para fazer ajustes, concluir tarefas ou mudar a especificação.");
   const runs = await listRuns(ctx, prs, 30);
   const rodando = runs.find((r) => r.feature === feature && isRunning(r));
   if (rodando) throw new Error(`O ${rodando.agente} está trabalhando nesta feature. Espere terminar para ajustar a spec.`);
   return f;
+}
+
+// ---------------------------------------------------------------- tarefas: reexecutar, encerrar, reabrir
+
+const DECISAO_COLS = ["Data", "Tarefa", "Decisão", "Justificativa", "Quem"];
+
+/** O Operador decide o destino de uma tarefa: reexecutar, não executar, resolvida de outra forma ou voltar a pendente. */
+export async function decidirTarefa(_: ActionState, fd: FormData): Promise<ActionState> {
+  try {
+    const ctx = await ctxFrom(fd, "aprovar");
+    const feature = str(fd, "feature", 80);
+    const tarefa = str(fd, "tarefa", 12).toUpperCase();
+    const intent = str(fd, "intent", 20);
+    const justificativa = str(fd, "justificativa", 1500);
+    if (!/^T-\d+$/.test(tarefa)) return { error: "Tarefa inválida." };
+    if (!["reexecutar", "nao_executar", "resolvido_fora", "pendente"].includes(intent)) return { error: "Ação inválida." };
+    if (intent !== "pendente" && justificativa.length < 5)
+      return { error: intent === "reexecutar" ? "Diga o que precisa ser feito ou corrigido nesta tarefa." : "Explique o motivo (fica registrado na documentação da feature)." };
+    const f = await featureEditavel(ctx, feature);
+    if (!f.tasksDoc) return { error: "A feature ainda não tem tasks.md." };
+
+    const status = intent === "reexecutar" ? "pendente" : intent;
+    const nota = intent === "reexecutar" ? `reexecução pedida pelo Operador: ${justificativa}` : justificativa;
+    let texto = definirStatusTarefa(f.tasksDoc.raw, tarefa, status, nota);
+    const decisao = { reexecutar: "reexecutar", nao_executar: "não será executada", resolvido_fora: "resolvida de outra forma", pendente: "reaberta (pendente)" }[intent]!;
+    texto = acrescentarNaSecao(texto, "Decisões sobre tarefas", DECISAO_COLS, [todaySaoPaulo(), tarefa, decisao, justificativa || "—", ctx.user.email]);
+    await writeFile(ctx.o, {
+      owner: ctx.owner, repo: ctx.repo, path: f.tasksDoc.path, branch: f.branch!, sha: f.tasksDoc.sha, content: texto,
+      message: `tasks(${feature}): ${tarefa} — ${decisao} (${ctx.user.email})`,
+    });
+    await comment(ctx, f.pr?.number, `🧍 **${tarefa}: ${decisao}** — ${quem(ctx)}${justificativa ? `\n\n> ${justificativa}` : ""}`);
+
+    let extra = "";
+    if (intent === "reexecutar") {
+      await dispatch(ctx, "orquestrador", feature, `O Operador ${quem(ctx)} pediu para reexecutar a tarefa ${tarefa} da feature ${feature}.\n\nO que precisa ser feito ou corrigido: ${justificativa}\n\nDespache o agente responsável, passe pelo QA, atualize tasks.md e a documentação afetada. Não mexa em tarefas marcadas como nao_executar ou resolvido_fora.`);
+      extra = " Orquestrador acionado.";
+    } else if (fd.get("docs") === "on" && intent !== "pendente") {
+      await dispatch(ctx, "governanca-docs", feature, `O Operador ${quem(ctx)} decidiu que a tarefa ${tarefa} da feature ${feature} ${decisao}. Motivo: ${justificativa}\n\nAtualize specs/${feature}/entrega.md (seção de tarefas não executadas ou resolvidas de outra forma, com a justificativa) e a documentação afetada (catálogo, lineage). Não altere pipelines.`);
+      extra = " Governança acionada para atualizar a documentação.";
+    }
+    await (await store()).audit({ actor: ctx.user.email, action: "tarefa.decidir", target: `${ctx.owner}/${ctx.repo} ${feature} ${tarefa}: ${decisao}` });
+    revalidatePath(`${base(ctx)}/f/${feature}`);
+    return { ok: true, message: `${tarefa}: ${decisao}.${extra}` };
+  } catch (e) {
+    return { error: errMsg(e) };
+  }
+}
+
+/** Pede à governança que atualize entrega.md e a documentação com o estado atual das tarefas. */
+export async function atualizarDocumentacao(_: ActionState, fd: FormData): Promise<ActionState> {
+  try {
+    const ctx = await ctxFrom(fd, "aprovar");
+    const feature = str(fd, "feature", 80);
+    await featureEditavel(ctx, feature);
+    await dispatch(ctx, "governanca-docs", feature, `Atualize a documentação da feature ${feature} com o estado atual: specs/${feature}/entrega.md (objetos, onde estão, tarefas concluídas, não executadas e resolvidas de outra forma, com as justificativas de "Decisões sobre tarefas"), catálogo e lineage.`);
+    revalidatePath(`${base(ctx)}/f/${feature}`);
+    return { ok: true, message: "Governança acionada para atualizar a documentação." };
+  } catch (e) {
+    return { error: errMsg(e) };
+  }
+}
+
+/** Reabre uma feature já entregue (G3): nova rodada na mesma branch, com PR novo. */
+export async function reabrirFeature(_: ActionState, fd: FormData): Promise<ActionState> {
+  let destino = "";
+  try {
+    const ctx = await ctxFrom(fd, "aprovar");
+    const feature = str(fd, "feature", 80);
+    const tipo = str(fd, "tipo", 10) === "spec" ? "spec" : "ajustes";
+    const motivo = str(fd, "motivo", 3000);
+    if (!RE_FEATURE.test(feature)) return { error: "Feature inválida." };
+    if (motivo.length < 10) return { error: "Descreva o que precisa ser feito nesta nova rodada." };
+    const prs = await listSquadPRs(ctx);
+    const branch = `squad/${feature}`;
+    if (prs.some((p) => p.headRef === branch && p.state === "open")) return { error: "A feature já está aberta (há um PR em andamento)." };
+    const f = await loadFeature(ctx, feature, false, prs);
+    if (f.gates.g3 !== "aprovado") return { error: "Só features entregues (G3) precisam ser reabertas. Esta ainda está em andamento." };
+
+    // branch da nova rodada: parte da main atual
+    const main = (await ctx.o.git.getRef({ owner: ctx.owner, repo: ctx.repo, ref: `heads/${ctx.defaultBranch}` })).data.object.sha;
+    const existente = await ctx.o.git.getRef({ owner: ctx.owner, repo: ctx.repo, ref: `heads/${branch}` }).then((r) => r.data.object.sha).catch((e) => (status(e) === 404 ? null : Promise.reject(e)));
+    if (!existente) await ctx.o.git.createRef({ owner: ctx.owner, repo: ctx.repo, ref: `refs/heads/${branch}`, sha: main });
+    else {
+      const cmp = (await ctx.o.repos.compareCommitsWithBasehead({ owner: ctx.owner, repo: ctx.repo, basehead: `${ctx.defaultBranch}...${branch}` })).data;
+      if (cmp.ahead_by === 0) await ctx.o.git.updateRef({ owner: ctx.owner, repo: ctx.repo, ref: `heads/${branch}`, sha: main, force: true });
+    }
+
+    // registra a reabertura no tasks.md (ou cria um, se a feature não tinha)
+    const tasksPath = `specs/${feature}/tasks.md`;
+    const atual = await readFile(ctx.o, ctx.owner, ctx.repo, tasksPath, branch);
+    const linha = [todaySaoPaulo(), ctx.user.email, tipo === "spec" ? "mudança na especificação" : "ajustes / tarefas pendentes", motivo];
+    let novo = acrescentarNaSecao(atual?.content ?? `---\nid: "${feature.slice(0, 3)}"\n---\n\n# Tarefas — ${feature}\n`, "Reaberturas", ["Data", "Quem", "Tipo", "O que fazer"], linha);
+    // a rodada nova vira uma tarefa pendente: o G3 só volta a ficar pronto quando ela for encerrada
+    const nova = adicionarTarefa(novo, {
+      tarefa: `Rodada reaberta em ${todaySaoPaulo()}: ${tipo === "spec" ? "mudança na especificação — " : ""}${motivo}`,
+      agente: "orquestrador",
+      criterio: "ajustes feitos, QA e revisão aprovados, entrega.md atualizado",
+    });
+    novo = nova.texto;
+    await writeFile(ctx.o, { owner: ctx.owner, repo: ctx.repo, path: tasksPath, branch, sha: atual?.sha, content: novo, message: `feature(${feature}): reaberta por ${ctx.user.email}` });
+
+    const anteriores = prs.filter((p) => p.headRef === branch && p.state === "merged").map((p) => `#${p.number}`);
+    const pr = await ctx.o.pulls.create({
+      owner: ctx.owner, repo: ctx.repo, base: ctx.defaultBranch, head: branch, draft: true,
+      title: `[squad] ${feature} — nova rodada`,
+      body: `Feature \`${feature}\` reaberta no Squad Console por ${quem(ctx)}${anteriores.length ? ` (entregas anteriores: ${anteriores.join(", ")})` : ""}.\n\n**O que fazer:** ${motivo}\n\nO merge deste PR é o novo **G3**.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)`,
+    });
+    await (await store()).audit({ actor: ctx.user.email, action: "feature.reabrir", target: `${ctx.owner}/${ctx.repo} ${feature} (${tipo}) PR #${pr.data.number}` });
+
+    if (tipo === "spec") {
+      destino = `${base(ctx)}/f/${feature}/spec`;
+    } else {
+      if (fd.get("acionar") === "on")
+        await dispatch(ctx, "orquestrador", feature, `A feature ${feature} foi reaberta pelo Operador ${quem(ctx)} depois do G3.\n\nO que fazer: ${motivo}\n\nRevise tasks.md: reexecute o que estiver pendente, crie tarefas novas (próximo T-xx) para os ajustes pedidos e não mexa nas marcadas nao_executar ou resolvido_fora. Passe por QA, revisão e governança (atualizando entrega.md) até o G3 ficar pronto de novo.`);
+      destino = `${base(ctx)}/f/${feature}?aba=tarefas`;
+    }
+  } catch (e) {
+    return { error: errMsg(e) };
+  }
+  redirect(destino);
 }
 
 /** O Operador edita a spec diretamente. Se ela estava aprovada, o G1 (e o G2) reabrem. */
@@ -347,6 +472,11 @@ export async function approveG3(_: ActionState, fd: FormData): Promise<ActionSta
     const f = await loadFeature(ctx, feature, true, prs);
     if (f.gates.g1 !== "aprovado" || f.gates.g2 !== "aprovado") return { error: "G1 e G2 precisam estar aprovados." };
     if (!f.pr || f.pr.state !== "open") return { error: "Não há Pull Request aberto para esta feature." };
+    const abertas = f.tasks.filter((t) => !STATUS_FINAL.includes(t.status));
+    if (abertas.length)
+      return {
+        error: `Ainda há ${abertas.length} tarefa(s) sem conclusão: ${abertas.map((t) => `${t.id} (${ROTULO_STATUS[t.status] ?? t.status})`).join(", ")}. Conclua, reexecute ou marque como "não será executada" / "resolvida de outra forma" na aba Tarefas.`,
+      };
     const checks = await prChecks(ctx, f.pr.headSha);
     if (checks.state === "failure") return { error: `${checks.failed} checagem(ns) falharam no PR. Corrija antes do G3.` };
     if (checks.state === "pending") return { error: "Ainda há checagens rodando no PR. Aguarde terminarem." };

@@ -135,7 +135,43 @@ export function applyAnswers(raw: string, respostas: Map<string, string>, quem: 
 }
 
 // ---------- tarefas ----------
-export type Task = { id: string; tarefa: string; agente: string; ciclos: string; status: string };
+export type Task = { id: string; tarefa: string; agente: string; ciclos: string; status: string; nota: string };
+
+/** Status possíveis de uma tarefa. Os três últimos encerram a tarefa. */
+export const STATUS_TAREFA = ["pendente", "em_andamento", "em_qa", "reprovado", "bloqueado", "aprovado", "nao_executar", "resolvido_fora"] as const;
+export const STATUS_FINAL = ["aprovado", "nao_executar", "resolvido_fora"];
+
+export const ROTULO_STATUS: Record<string, string> = {
+  pendente: "pendente",
+  em_andamento: "em andamento",
+  em_qa: "em QA",
+  reprovado: "reprovada no QA",
+  bloqueado: "bloqueada",
+  aprovado: "concluída",
+  nao_executar: "não será executada",
+  resolvido_fora: "resolvida de outra forma",
+};
+
+/** Lê o status de uma célula como "aprovado (QA ok)", "`em_qa`" ou "Não executar — fora do escopo". */
+export function normalizarStatus(celula: string): { status: string; nota: string } {
+  const limpo = celula.replace(/`/g, "").trim();
+  const sem = limpo.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const alias: [RegExp, string][] = [
+    [/^(aprovad[oa]|conclu[ií]d[oa]|feit[oa]|done)\b/, "aprovado"],
+    [/^(nao[ _-]?executar|nao sera executad[oa]|cancelad[oa]|descartad[oa])\b/, "nao_executar"],
+    [/^(resolvid[oa][ _-]?(fora|de outra forma)|resolvido_fora)\b/, "resolvido_fora"],
+    [/^em[ _-]?andamento\b/, "em_andamento"],
+    [/^em[ _-]?qa\b/, "em_qa"],
+    [/^reprovad[oa]\b/, "reprovado"],
+    [/^bloquead[oa]\b/, "bloqueado"],
+    [/^pendente\b/, "pendente"],
+  ];
+  for (const [re, st] of alias) {
+    const m = sem.match(re);
+    if (m) return { status: st, nota: limpo.slice(m[0].length).replace(/^[\s(—–:-]+|\)\s*$/g, "").trim() };
+  }
+  return { status: sem.split(/\s/)[0] ?? "", nota: "" };
+}
 
 export function parseTasks(body: string): Task[] {
   const lines = body.split(/\r?\n/);
@@ -154,7 +190,7 @@ export function parseTasks(body: string): Task[] {
       tarefa: c[iTarefa] ?? "",
       agente: c[iAgente] ?? "",
       ciclos: iCiclos >= 0 ? c[iCiclos] ?? "" : "",
-      status: (iStatus >= 0 ? c[iStatus] ?? "" : "").replace(/`/g, "").toLowerCase(),
+      ...normalizarStatus(iStatus >= 0 ? c[iStatus] ?? "" : ""),
     });
   }
   return out;
@@ -293,6 +329,8 @@ export type GateInput = {
   hasReview: boolean;
   prState?: "open" | "closed" | "merged";
   onMainOnly: boolean;
+  /** Tarefas ainda não encerradas (o G3 só fica pronto quando chega a zero). */
+  tarefasAbertas?: number;
 };
 
 export function computeGates(i: GateInput): { g1: GateState; g2: GateState; g3: GateState } {
@@ -302,7 +340,7 @@ export function computeGates(i: GateInput): { g1: GateState; g2: GateState; g3: 
   if (g1 === "aprovado") g2 = !i.designStatus ? "pendente" : i.designStatus === "aprovado" ? "aprovado" : "aguardando";
   let g3: GateState = "nao_iniciado";
   if (g2 === "aprovado") {
-    const pronto = i.prState === "open" && i.hasReview && (i.qaVeredito ?? "").toUpperCase().startsWith("APROVADO");
+    const pronto = i.prState === "open" && i.hasReview && (i.qaVeredito ?? "").toUpperCase().startsWith("APROVADO") && !(i.tarefasAbertas ?? 0);
     g3 = pronto ? "aguardando" : "pendente";
   }
   return { g1, g2, g3 };
@@ -430,7 +468,7 @@ const RE_BLOQUEIO = /decis[aã]o necess[aá]ria|bloquead|para destravar|preciso 
 export function situacao(i: SituacaoInput): Situacao {
   const g = i.gates;
   if (g.g3 === "aprovado")
-    return { tipo: "entregue", titulo: "Entregue", detalhe: "O PR foi mesclado na branch principal. Veja tudo o que foi construído e baixe os documentos na aba Entrega.", acao: "ver_entrega" };
+    return { tipo: "entregue", titulo: "Entregue", detalhe: "O PR foi mesclado na branch principal. Veja tudo o que foi construído na aba Entrega. Para ajustes, tarefas pendentes ou mudar a especificação, use Reabrir a feature.", acao: "ver_entrega" };
   if (i.rodando) {
     return {
       tipo: "rodando",
@@ -465,6 +503,7 @@ export function situacao(i: SituacaoInput): Situacao {
   const passo = nextStep(g, i.feature);
   const bloqueadas = i.tarefas.filter((t) => t.status === "bloqueado").length;
   const andando = i.tarefas.filter((t) => ["em_andamento", "em_qa", "pendente", "reprovado"].includes(t.status)).length;
+  const abertas = i.tarefas.filter((t) => !STATUS_FINAL.includes(t.status)).length;
   if (i.ultima && (RE_BLOQUEIO.test(i.ultima.resumo) || (bloqueadas > 0 && andando === 0)))
     return {
       tipo: "voce",
@@ -478,12 +517,12 @@ export function situacao(i: SituacaoInput): Situacao {
     return { tipo: "voce", titulo: "Acione o analista para escrever a spec", detalhe: "Nada está rodando e a spec ainda não existe.", acao: "acionar", ...passo };
   if (g.g2 === "pendente")
     return { tipo: "voce", titulo: "Acione o arquiteto", detalhe: "A spec foi aprovada (G1), mas o design ainda não foi feito e nada está rodando.", acao: "acionar", ...passo };
-  const feitas = i.tarefas.filter((t) => t.status === "aprovado").length;
+  const feitas = i.tarefas.length - abertas;
   return {
     tipo: "voce",
     titulo: "Parada: acione o orquestrador para continuar",
     detalhe: i.ultima
-      ? `O ${i.ultima.agente} terminou a execução, mas o G3 ainda não está pronto${i.tarefas.length ? ` (${feitas} de ${i.tarefas.length} tarefas aprovadas)` : ""}. Cada execução tem limite de turnos; acione de novo para seguir.`
+      ? `O ${i.ultima.agente} terminou a execução, mas o G3 ainda não está pronto${i.tarefas.length ? ` (${feitas} de ${i.tarefas.length} tarefas encerradas)` : ""}. Cada execução tem limite de turnos; acione de novo para seguir.`
       : "Spec e design aprovados. Nada está rodando: acione o orquestrador para implementar.",
     acao: "acionar",
     ...passo,
@@ -499,4 +538,78 @@ export function resumoExecucao(body: string): string {
     .map((l) => l.replace(/^>\s?/, ""))
     .join("\n")
     .trim();
+}
+
+// ---------- edição do tasks.md pelo Operador ----------
+
+/** Troca o status (e a observação) de uma tarefa na tabela de tarefas. */
+export function definirStatusTarefa(texto: string, id: string, status: string, nota = ""): string {
+  const linhas = texto.split("\n");
+  const ih = linhas.findIndex((l) => /^\|\s*ID\s*\|/i.test(l) && /status/i.test(l));
+  if (ih < 0) throw new Error("tasks.md não tem a tabela de tarefas.");
+  const cab = splitRow(linhas[ih]).map((h) => h.toLowerCase());
+  const iStatus = cab.findIndex((h) => h.startsWith("status"));
+  const iId = cab.findIndex((h) => h.startsWith("id"));
+  for (let i = ih + 2; i < linhas.length && linhas[i].trim().startsWith("|"); i++) {
+    const c = splitRow(linhas[i]);
+    if (c[iId]?.toUpperCase() !== id.toUpperCase()) continue;
+    c[iStatus] = nota ? `${status} — ${nota.replace(/\|/g, "/").replace(/\s+/g, " ").trim()}` : status;
+    linhas[i] = `| ${c.join(" | ")} |`;
+    return linhas.join("\n");
+  }
+  throw new Error(`Tarefa ${id} não encontrada no tasks.md.`);
+}
+
+/** Acrescenta uma linha a uma tabela de seção (cria a seção se não existir). */
+export function acrescentarNaSecao(texto: string, titulo: string, cabecalho: string[], valores: string[]): string {
+  const linha = `| ${valores.map((v) => v.replace(/\|/g, "/").replace(/\s+/g, " ").trim()).join(" | ")} |`;
+  const re = new RegExp(`^## ${titulo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "m");
+  const m = re.exec(texto);
+  if (!m) {
+    const tabela = [`| ${cabecalho.join(" | ")} |`, `|${cabecalho.map(() => "---").join("|")}|`, linha].join("\n");
+    return `${texto.replace(/\s*$/, "")}\n\n## ${titulo}\n${tabela}\n`;
+  }
+  // fim da tabela logo após o título
+  const depois = texto.slice(m.index + m[0].length).split("\n");
+  let k = 1;
+  while (k < depois.length && (depois[k].trim() === "" ? k === 1 : depois[k].trim().startsWith("|"))) k++;
+  // remove linha vazia de exemplo do template ("|      |        |")
+  const corpo = depois.slice(0, k).filter((l) => !/^\|(\s*\|)+\s*$/.test(l));
+  return texto.slice(0, m.index + m[0].length) + [...corpo, linha, ...depois.slice(k)].join("\n");
+}
+
+/** Acrescenta uma tarefa nova (próximo T-xx) na tabela de tarefas, com status pendente. */
+export function adicionarTarefa(texto: string, campos: { tarefa: string; agente: string; criterio?: string }): { texto: string; id: string } {
+  const linhas = texto.split("\n");
+  const ih = linhas.findIndex((l) => /^\|\s*ID\s*\|/i.test(l) && /status/i.test(l));
+  if (ih < 0) {
+    const id = "T-01";
+    const tabela = [
+      "| ID | Tarefa | Agente | Depende de | Entradas | Saída | Critério de pronto | Ciclos QA | Status |",
+      "|----|--------|--------|------------|----------|-------|--------------------|-----------|--------|",
+      `| ${id} | ${campos.tarefa} | ${campos.agente} | — | — | — | ${campos.criterio ?? "—"} | 0 | pendente |`,
+    ].join("\n");
+    return { texto: `${texto.replace(/\s*$/, "")}\n\n${tabela}\n`, id };
+  }
+  const cab = splitRow(linhas[ih]).map((h) => h.toLowerCase());
+  let fim = ih + 2;
+  let maior = 0;
+  while (fim < linhas.length && linhas[fim].trim().startsWith("|")) {
+    const n = Number(splitRow(linhas[fim])[0]?.match(/^T-(\d+)/i)?.[1] ?? 0);
+    maior = Math.max(maior, n);
+    fim++;
+  }
+  const id = `T-${String(maior + 1).padStart(2, "0")}`;
+  const limpa = (v: string) => v.replace(/\|/g, "/").replace(/\s+/g, " ").trim();
+  const valores = cab.map((h) => {
+    if (h.startsWith("id")) return id;
+    if (h.startsWith("tarefa")) return limpa(campos.tarefa);
+    if (h.startsWith("agente")) return campos.agente;
+    if (h.startsWith("crit")) return limpa(campos.criterio ?? "—");
+    if (h.startsWith("ciclos")) return "0";
+    if (h.startsWith("status")) return "pendente";
+    return "—";
+  });
+  linhas.splice(fim, 0, `| ${valores.join(" | ")} |`);
+  return { texto: linhas.join("\n"), id };
 }

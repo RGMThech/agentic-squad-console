@@ -70,9 +70,15 @@ export async function arquivosDaFeature(ctx: SquadContext, f: Feature): Promise<
   const ref = refDaFeature(ctx, f);
   const web = (p: string) => `https://github.com/${ctx.owner}/${ctx.repo}/blob/${encodeURIComponent(ref)}/${p.split("/").map(encodeURIComponent).join("/")}`;
   let lista: { path: string; status: "novo" | "alterado" }[] = [];
-  if (f.pr) {
-    const files = await ctx.o.paginate(ctx.o.pulls.listFiles, { owner: ctx.owner, repo: ctx.repo, pull_number: f.pr.number, per_page: 100 });
-    lista = files.filter((x) => x.status !== "removed").map((x) => ({ path: x.filename, status: x.status === "added" ? "novo" : "alterado" }));
+  // todas as rodadas da feature (PR atual e entregas anteriores)
+  for (const pr of [...f.prs].reverse()) {
+    const files = await ctx.o.paginate(ctx.o.pulls.listFiles, { owner: ctx.owner, repo: ctx.repo, pull_number: pr.number, per_page: 100 });
+    for (const x of files) {
+      const i = lista.findIndex((l) => l.path === x.filename);
+      if (x.status === "removed") {
+        if (i >= 0) lista.splice(i, 1);
+      } else if (i < 0) lista.push({ path: x.filename, status: x.status === "added" ? "novo" : "alterado" });
+    }
   }
   // garante os documentos da pasta da feature (pedido.md pode ter vindo antes do PR)
   try {

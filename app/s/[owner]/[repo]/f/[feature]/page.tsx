@@ -9,6 +9,8 @@ import { DocBadge, GateTrack, RunIcon } from "@/components/Status";
 import { DoubtsPanel } from "@/components/DoubtsPanel";
 import { SituacaoCard } from "@/components/Situacao";
 import { EntregaView } from "@/components/Entrega";
+import { ReabrirFeature } from "@/components/Reabrir";
+import { TarefasView } from "@/components/Tarefas";
 import { approveG3, approveGate, askSpecChange, requestChanges, runAgent } from "@/lib/actions";
 import { AGENTES_PADRAO, RE_FEATURE, can, nextStep, parseDoubts } from "@/lib/core";
 import { ago, money, runDuration, when } from "@/lib/format";
@@ -172,32 +174,18 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
               {aba === "design" && <DocView doc={f.design} vazio="O design é criado pelo arquiteto depois do G1." />}
               {aba === "tarefas" &&
                 (f.tasks.length ? (
-                  <div className="table-wrap">
-                    <table className="table">
-                      <thead>
-                        <tr>
-                          <th>ID</th>
-                          <th>Tarefa</th>
-                          <th>Agente</th>
-                          <th className="num">Ciclos QA</th>
-                          <th>Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {f.tasks.map((t) => (
-                          <tr key={t.id}>
-                            <td className="mono xs">{t.id}</td>
-                            <td>{t.tarefa}</td>
-                            <td className="small">{t.agente}</td>
-                            <td className="num">{t.ciclos}</td>
-                            <td>
-                              <TaskBadge status={t.status} />
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <TarefasView
+                    tasks={f.tasks}
+                    hidden={hidden}
+                    podeDecidir={operador && f.gates.g3 !== "aprovado" && running.length === 0}
+                    motivoBloqueio={
+                      f.gates.g3 === "aprovado"
+                        ? "Feature entregue: para mexer nas tarefas, use Reabrir a feature."
+                        : running.length > 0
+                          ? `O ${running[0].agente} está trabalhando; as decisões ficam disponíveis quando ele terminar.`
+                          : undefined
+                    }
+                  />
                 ) : (
                   <DocView doc={f.tasksDoc} vazio="As tarefas são criadas pelo orquestrador depois do G2." />
                 ))}
@@ -289,9 +277,18 @@ export default async function FeaturePage({ params, searchParams }: { params: Pa
               </div>
             )}
 
-            {f.gates.g3 === "aprovado" && (
-              <div className="alert alert-ok">Feature entregue: o PR foi mesclado na branch principal.</div>
-            )}
+            {f.gates.g3 === "aprovado" &&
+              (operador ? (
+                <div className="card card-pad stack-sm" id="reabrir">
+                  <h3>Reabrir a feature</h3>
+                  <p className="small muted">
+                    Para corrigir algo, concluir tarefas que ficaram para trás ou mudar a especificação. Abre uma nova rodada (PR novo) na mesma feature; o histórico das entregas anteriores continua na aba Entrega.
+                  </p>
+                  <ReabrirFeature hidden={hidden} />
+                </div>
+              ) : (
+                <div className="alert alert-ok">Feature entregue: o PR foi mesclado na branch principal.</div>
+              ))}
 
             {/* ---------------- ajustar a especificação ---------------- */}
             {operador && f.spec && f.gates.g3 !== "aprovado" && (
@@ -430,17 +427,6 @@ function DocView({ doc, vazio }: { doc: Doc | null; vazio: string }) {
       </div>
     </>
   );
-}
-
-function TaskBadge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    aprovado: "badge-green",
-    reprovado: "badge-red",
-    bloqueado: "badge-red",
-    em_qa: "badge-amber",
-    em_andamento: "badge-blue",
-  };
-  return <span className={`badge ${map[status] ?? ""}`}>{status.replace("_", " ") || "—"}</span>;
 }
 
 function ChecksBadge({ state }: { state: string }) {

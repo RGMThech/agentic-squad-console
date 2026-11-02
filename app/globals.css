@@ -505,3 +505,10 @@ code, pre, kbd { font-family: var(--mono); font-size: 0.9em; }
 .convite-armadilha { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
 .convite-ok { display: flex; gap: 14px; align-items: center; text-align: left; background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 18px 22px; }
 .convite-ok h3 { margin: 0; }
+
+/* ---------- tarefas ---------- */
+.tarefas-topo { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; border-bottom: 1px solid var(--line); }
+.tarefa-decidir { margin-top: 6px; }
+.tarefa-decidir summary { cursor: pointer; color: var(--blue); font-weight: 600; }
+.tarefa-decidir .form { margin-top: 8px; padding: 12px; background: #fafcfe; border: 1px solid var(--line); border-radius: 10px; gap: 10px; }
+.tarefa-nota { margin-top: 4px; max-width: 280px; }

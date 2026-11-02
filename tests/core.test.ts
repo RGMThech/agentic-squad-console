@@ -78,7 +78,7 @@ test("tarefas: lê a tabela do template", () => {
 | Data | Tarefa |`;
   const t = parseTasks(md);
   assert.equal(t.length, 2);
-  assert.deepEqual(t[1], { id: "T-02", tarefa: "Silver", agente: "eng-transformacao", ciclos: "2", status: "em_qa" });
+  assert.deepEqual(t[1], { id: "T-02", tarefa: "Silver", agente: "eng-transformacao", ciclos: "2", status: "em_qa", nota: "" });
 });
 
 test("ids: próximo número e slug sem acento", () => {

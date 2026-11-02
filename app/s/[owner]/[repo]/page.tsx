@@ -3,7 +3,7 @@ import { AutoRefresh } from "@/components/AutoRefresh";
 import { IconExternal, IconPlus } from "@/components/Icons";
 import { PageHead } from "@/components/Shell";
 import { GatesMini, RoleBadge, RunBadge } from "@/components/Status";
-import { can } from "@/lib/core";
+import { can, STATUS_FINAL } from "@/lib/core";
 import { SituacaoBadge } from "@/components/Situacao";
 import { ago, money } from "@/lib/format";
 import { getPRs, getSquad, type SquadParams } from "@/lib/page";
@@ -127,7 +127,7 @@ export default async function Overview({ params }: { params: SquadParams }) {
                   ))}
                   {features.map((f) => {
                     const sit = situacoes.get(f.id)!;
-                    const feitas = f.tasks.filter((t) => t.status === "aprovado").length;
+                    const feitas = f.tasks.filter((t) => STATUS_FINAL.includes(t.status)).length;
                     const ultima = ultimaPorFeature.get(f.id);
                     return (
                       <tr key={f.id} className="clickable">

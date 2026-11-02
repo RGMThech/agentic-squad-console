@@ -10,6 +10,7 @@ import {
   parseMembers,
   parseRunRecords,
   resumoExecucao,
+  STATUS_FINAL,
   parseDoubts,
   situacao,
   type Situacao,
@@ -92,6 +93,8 @@ export type Feature = {
   entrega?: Doc | null;
   doubts: string[];
   pr: PR | null;
+  /** Todos os PRs da feature (rodadas anteriores incluídas), do mais novo para o mais antigo. */
+  prs: PR[];
   gates: { g1: GateState; g2: GateState; g3: GateState };
 };
 
@@ -278,9 +281,12 @@ export async function loadFeature(ctx: SquadContext, id: string, hasBranch: bool
     ["spec.md", "design.md", "tasks.md", "qa-report.md", "review.md"].map((f) => readDoc(ctx, `${base}/${f}`, ref)),
   );
   // o PR é achado mesmo depois do merge, quando a branch já foi apagada
-  const pr = prs.filter((p) => p.headRef === `squad/${id}`).sort((a, b) => b.number - a.number)[0] || null;
+  const daFeature = prs.filter((p) => p.headRef === `squad/${id}` && p.state !== "closed").sort((a, b) => b.number - a.number);
+  const pr = daFeature[0] || null;
   const [pedido, entrega] = extras ? await Promise.all([readDoc(ctx, `${base}/pedido.md`, ref), readDoc(ctx, `${base}/entrega.md`, ref)]) : [undefined, undefined];
+  const tarefas = tasksDoc ? parseTasks(tasksDoc.body) : [];
   const gates = computeGates({
+    tarefasAbertas: tarefas.filter((t) => !STATUS_FINAL.includes(t.status)).length,
     specStatus: spec?.data.status,
     designStatus: design?.data.status,
     qaVeredito: qa?.data.veredito,
@@ -297,13 +303,14 @@ export async function loadFeature(ctx: SquadContext, id: string, hasBranch: bool
     spec,
     design,
     tasksDoc,
-    tasks: tasksDoc ? parseTasks(tasksDoc.body) : [],
+    tasks: tarefas,
     qa,
     review,
     pedido,
     entrega,
     doubts: spec ? openDoubts(spec.body) : [],
     pr,
+    prs: daFeature,
     gates,
   };
 }
