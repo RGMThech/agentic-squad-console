@@ -123,6 +123,7 @@ Na página do App → **Install App** → **RGMThech** → **All repositories** 
 | `GITHUB_ORG` | opcional: a primeira organização (ex.: `RGMThech`); as outras são conectadas no console |
 | `SQUAD_TEMPLATE_REPO` | template padrão, `RGMThech/agentic-data-squad` (cada conexão pode ter o seu) |
 | `CONEXOES_KEY` | opcional: texto aleatório de 32+ caracteres para cifrar chaves de Apps próprios (padrão: `SESSION_SECRET`) |
+| `CONVITE_EMAIL` | opcional: quem recebe os pedidos de convite da landing page (padrão `mellrodrigo@gmail.com`) |
 | `SQUAD_TOPIC` | `agentic-data-squad` |
 
 Gerar o `SESSION_SECRET` no PowerShell:

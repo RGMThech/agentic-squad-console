@@ -64,6 +64,10 @@ export const env = {
   get mailTransport() {
     return (process.env.MAIL_TRANSPORT || (process.env.SMTP_HOST ? "smtp" : "console")).toLowerCase();
   },
+  /** Quem recebe os pedidos de convite feitos pela landing page. */
+  get conviteEmail() {
+    return (process.env.CONVITE_EMAIL || "mellrodrigo@gmail.com").trim();
+  },
   /** Administradores iniciais: entram mesmo sem convite e não podem ser rebaixados pelo console. */
   get adminEmails() {
     return list(process.env.ADMIN_EMAILS);

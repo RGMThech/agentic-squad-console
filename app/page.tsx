@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SolicitarConvite } from "@/components/SolicitarConvite";
 import { IconBot, IconCheck, IconCoins, IconGate, IconLayers, IconSettings } from "@/components/Icons";
 import { BRAND } from "@/lib/brand";
 import { currentUser } from "@/lib/session";
@@ -117,6 +118,16 @@ export default async function Landing() {
           <Link href={cta.href} className="btn btn-primary" style={{ height: 46, padding: "0 26px", fontSize: 15 }}>
             {cta.label}
           </Link>
+        </div>
+      </section>
+
+      <section className="site-section site-alt" id="convite">
+        <div className="site-wrap convite">
+          <h2 className="site-h2">Quer uma squad agêntica no seu time de dados?</h2>
+          <p className="muted" style={{ maxWidth: 620, margin: "10px auto 26px" }}>
+            O acesso é só por convite. Conte quem você é e o que quer resolver; respondemos por e-mail.
+          </p>
+          <SolicitarConvite />
         </div>
       </section>
 

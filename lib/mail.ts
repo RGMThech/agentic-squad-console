@@ -2,7 +2,7 @@ import "server-only";
 import { BRAND } from "./brand";
 import { env } from "./env";
 
-type Mail = { to: string; subject: string; text: string; html: string };
+type Mail = { to: string; subject: string; text: string; html: string; replyTo?: string };
 
 function transport() {
   return import("nodemailer").then(({ default: nodemailer }) => {
@@ -43,6 +43,7 @@ async function send(m: Mail) {
     subject: m.subject,
     text: m.text,
     html: m.html,
+    ...(m.replyTo ? { replyTo: m.replyTo } : {}),
   });
 }
 
@@ -87,6 +88,37 @@ export async function sendInvite(to: string, nome: string, porQuem: string) {
       `<p style="margin:0 0 18px;font-size:15px">${esc(porQuem)} convidou você para o <b>${BRAND.produto}</b> da ${BRAND.empresa}.</p>
 <p style="margin:0 0 22px;font-size:15px">Para entrar, acesse o endereço abaixo e informe este e-mail. Você vai receber um código de acesso — não há senha.</p>
 <p style="margin:0"><a href="${esc(url)}" style="display:inline-block;background:#0072bc;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 22px;border-radius:9px">Acessar o ${BRAND.produto}</a></p>`,
+    ),
+  });
+}
+
+export type PedidoConvite = { nome: string; email: string; empresa: string; cargo: string; mensagem: string; ip: string };
+
+/** Avisa o responsável que alguém pediu convite pela landing page (responder vai direto para a pessoa). */
+export async function sendPedidoConvite(para: string, p: PedidoConvite) {
+  const linhas: [string, string][] = [
+    ["Nome", p.nome],
+    ["E-mail", p.email],
+    ["Empresa", p.empresa],
+    ["Cargo", p.cargo],
+    ["Mensagem", p.mensagem],
+  ];
+  const quando = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+  await send({
+    to: para,
+    replyTo: p.email,
+    subject: `Pedido de convite: ${p.nome}${p.empresa ? ` (${p.empresa})` : ""}`,
+    text: `Novo pedido de convite pela landing page do ${BRAND.produto}.\n\n${linhas.filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join("\n")}\n\nRecebido em ${quando}.\nPara liberar o acesso: ${env.appUrl}/admin/usuarios → Convidar. Responder este e-mail fala direto com a pessoa.`,
+    html: layout(
+      "Novo pedido de convite",
+      `<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;font-size:14px;border-collapse:collapse">
+${linhas
+  .filter(([, v]) => v)
+  .map(([k, v]) => `<tr><td style="padding:6px 10px 6px 0;color:#5a6b85;vertical-align:top;white-space:nowrap">${k}</td><td style="padding:6px 0">${esc(v).replace(/\n/g, "<br>")}</td></tr>`)
+  .join("\n")}
+</table>
+<p style="margin:18px 0 6px;font-size:13px;color:#5a6b85">Recebido em ${esc(quando)}. Responder este e-mail fala direto com a pessoa.</p>
+<p style="margin:16px 0 0"><a href="${esc(env.appUrl)}/admin/usuarios" style="display:inline-block;background:#0072bc;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 22px;border-radius:9px">Convidar no ${BRAND.produto}</a></p>`,
     ),
   });
 }

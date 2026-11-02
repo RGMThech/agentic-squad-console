@@ -23,6 +23,7 @@ const ROTULO: Record<string, string> = {
   "squad.databricks": "Configurou acesso a dados",
   "squad.dados": "Configurou acesso a dados",
   erro: "Erro no servidor",
+  "convite.solicitado": "Pediu convite (landing page)",
 };
 
 export default async function AuditoriaPage() {
