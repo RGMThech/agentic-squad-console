@@ -12,7 +12,7 @@ import { requireUser } from "./session";
 import { isRunning, listFeatureIds, listRuns, listSquadPRs, loadFeature, loadSquad, prChecks, secretStatus, type SquadContext } from "./squad";
 import { normalizeConexao, parseLeitura, setDadosYaml, testConnection, validateDados, validateSegredos, type Check } from "./dados";
 import { ehPlataforma, PLATAFORMAS, type DadosConfig } from "./dados-meta";
-import { dicasPedido, nomeDoTipo, parseBaseTipos, planejarTipo, topicoDoTipo } from "./tipo";
+import { dicasPedido, nomeDoTipo, parseBaseTipos, planejarTipo, PREFIXO_TOPICO, topicoDoTipo } from "./tipo";
 import {
   RE_AGENT,
   applyAnswers,
@@ -994,4 +994,63 @@ ${lista}`;
   } catch (e) {
     return { error: errMsg(e) };
   }
+}
+
+// ---------------------------------------------------------------- excluir squad
+
+/**
+ * Exclui uma squad. Só administradores do console, digitando o nome do repositório.
+ * - modo "repositorio": apaga o repositório no GitHub (irreversível: código, specs, PRs, issues e execuções);
+ * - modo "console": só tira a squad do console (remove o tópico); o repositório continua no GitHub.
+ */
+export async function excluirSquad(_: ActionState, fd: FormData): Promise<ActionState> {
+  let destino = "";
+  try {
+    const user = await requireUser();
+    if (!user.isAdmin) return { error: "Somente administradores do console podem excluir squads." };
+    const owner = str(fd, "owner", 100);
+    const repo = str(fd, "repo", 100);
+    const modo = str(fd, "modo", 20) === "console" ? "console" : "repositorio";
+    if (!RE_NAME.test(owner) || !RE_NAME.test(repo)) return { error: "Squad inválida." };
+    if (str(fd, "confirmacao", 100) !== repo) return { error: `Digite exatamente o nome do repositório (${repo}) para confirmar.` };
+    const conexao = await conexaoDe(owner);
+    if (!conexao) return { error: `A organização ${owner} não está conectada ao console.` };
+    const templates = [conexao.template, env.templateRepo].filter(Boolean).map((t) => t.toLowerCase());
+    if (templates.includes(`${owner}/${repo}`.toLowerCase()))
+      return { error: `${owner}/${repo} é o template usado para criar squads. Ele não pode ser excluído por aqui.` };
+
+    const o = await gh(owner);
+    let info;
+    try {
+      info = (await o.repos.get({ owner, repo })).data;
+    } catch (e) {
+      if (status(e) === 404) return { error: `O repositório ${owner}/${repo} não existe mais ou o GitHub App não tem acesso a ele.` };
+      throw e;
+    }
+    if (info.is_template) return { error: `${owner}/${repo} está marcado como template no GitHub. Ele não pode ser excluído por aqui.` };
+    const topicos = (info.topics ?? []).map((t) => t.toLowerCase());
+    if (!topicos.includes(env.topic)) return { error: `${owner}/${repo} não é uma squad do console (sem o tópico ${env.topic}).` };
+
+    if (modo === "console") {
+      await o.repos.replaceAllTopics({ owner, repo, names: (info.topics ?? []).filter((t) => t.toLowerCase() !== env.topic && !t.startsWith(PREFIXO_TOPICO)) });
+      await (await store()).audit({ actor: user.email, action: "squad.remover_do_console", target: `${owner}/${repo}` });
+      destino = `/squads?removida=${encodeURIComponent(`${owner}/${repo}`)}`;
+    } else {
+      try {
+        await o.repos.delete({ owner, repo });
+      } catch (e) {
+        if (status(e) === 403)
+          return {
+            error: `O GitHub recusou a exclusão de ${owner}/${repo}. O GitHub App precisa da permissão "Administration: Read and write" aprovada na instalação de ${owner}, e a organização precisa permitir a exclusão de repositórios (Settings → Member privileges → Repository deletion and transfer). Detalhe: ${errDetail(e)}`,
+          };
+        throw e;
+      }
+      await (await store()).audit({ actor: user.email, action: "squad.excluir", target: `${owner}/${repo} (repositório apagado no GitHub)` });
+      destino = `/squads?excluida=${encodeURIComponent(`${owner}/${repo}`)}`;
+    }
+    revalidatePath("/squads");
+  } catch (e) {
+    return { error: errMsg(e) };
+  }
+  redirect(destino);
 }

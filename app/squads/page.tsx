@@ -9,8 +9,9 @@ import { nomeDoTipo, TIPOS_CONHECIDOS } from "@/lib/tipo";
 
 export const metadata = { title: "Squads" };
 
-export default async function SquadsPage() {
+export default async function SquadsPage({ searchParams }: { searchParams: Promise<{ excluida?: string; removida?: string }> }) {
   const user = await requireUser();
+  const { excluida, removida } = await searchParams;
   let squads: SquadSummary[] = [];
   let falhas: { owner: string; erro: string }[] = [];
   let erro = "";
@@ -40,6 +41,8 @@ export default async function SquadsPage() {
       />
       <div className="content">
         {erro && <div className="alert alert-error">{erro}</div>}
+        {excluida && <div className="alert alert-ok" style={{ marginBottom: 12 }}>Squad <b>{excluida}</b> excluída e repositório apagado no GitHub.</div>}
+        {removida && <div className="alert alert-ok" style={{ marginBottom: 12 }}>Squad <b>{removida}</b> tirada do console. O repositório continua no GitHub.</div>}
         {user.isAdmin &&
           falhas.map((f) => (
             <div key={f.owner} className="alert alert-warn small" style={{ marginBottom: 12 }}>

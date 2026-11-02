@@ -13,6 +13,7 @@ import { apiKeyStatus, listSquadPRs, secretStatus } from "@/lib/squad";
 import { DadosCard } from "@/components/DadosCard";
 import { TODOS_SEGREDOS } from "@/lib/dados-meta";
 import { DOCS_DO_TIPO } from "@/lib/tipo";
+import { ExcluirSquad } from "@/components/ExcluirSquad";
 
 export const metadata = { title: "Configuração" };
 
@@ -333,6 +334,16 @@ export default async function ConfigPage({ params, searchParams }: { params: Squ
             </div>
           </section>
         </div>
+
+        {ctx.user.isAdmin && (
+          <section className="card card-pad stack-sm zona-perigo" id="excluir">
+            <h2>Excluir a squad</h2>
+            <p className="small muted">
+              Só administradores do console veem esta área. Antes de apagar, baixe o que precisar guardar (aba Entrega de cada feature → Baixar tudo).
+            </p>
+            <ExcluirSquad owner={owner} repo={repo} />
+          </section>
+        )}
       </div>
     </>
   );

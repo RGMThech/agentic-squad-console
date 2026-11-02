@@ -526,3 +526,8 @@ code, pre, kbd { font-family: var(--mono); font-size: 0.9em; }
 .tipo-card.ativo .tipo-ic { background: var(--blue); color: #fff; }
 .tipo-txt { display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; line-height: 1.35; }
 .badge-tipo { display: inline-flex; align-items: center; gap: 5px; }
+
+/* ---------- zona de perigo ---------- */
+.zona-perigo { margin-top: 20px; border-color: var(--red); }
+.zona-perigo h2 { color: var(--red); }
+.btn-danger[disabled] { opacity: 0.5; cursor: not-allowed; }
