@@ -2,7 +2,8 @@ import Link from "next/link";
 import { IconeTipo, IconLayers, IconPlus } from "@/components/Icons";
 import { PageHead } from "@/components/Shell";
 import { ago } from "@/lib/format";
-import { errMsg } from "@/lib/github";
+import { errMsg, listarConexoes } from "@/lib/github";
+import { env } from "@/lib/env";
 import { requireUser } from "@/lib/session";
 import { listSquads, type SquadSummary } from "@/lib/squad";
 import { nomeDoTipo, TIPOS_CONHECIDOS } from "@/lib/tipo";
@@ -21,6 +22,10 @@ export default async function SquadsPage({ searchParams }: { searchParams: Promi
     erro = errMsg(e);
   }
   const orgs = [...new Set(squads.map((s) => s.owner))];
+  // templates de criação não aparecem para exclusão
+  const templates = new Set(
+    user.isAdmin ? [env.templateRepo, ...(await listarConexoes().catch(() => [])).map((c) => c.template)].filter(Boolean).map((t) => t.toLowerCase()) : [],
+  );
 
   return (
     <>
@@ -70,20 +75,29 @@ export default async function SquadsPage({ searchParams }: { searchParams: Promi
         {orgs.length > 1 && <p className="small muted" style={{ marginBottom: 12 }}>{orgs.length} organizações: {orgs.join(", ")}</p>}
         <div className="grid grid-3">
           {squads.map((s) => (
-            <Link key={`${s.owner}/${s.repo}`} href={`/s/${s.owner}/${s.repo}`} className="card squad-card">
+            <div key={`${s.owner}/${s.repo}`} className="card squad-card">
+              <Link href={`/s/${s.owner}/${s.repo}`} className="squad-card-link">
+                <div className="spread">
+                  <span className="badge badge-blue">{s.owner}</span>
+                  <span className="badge">{s.private ? "Privado" : "Público"}</span>
+                </div>
+                <h3>{s.repo}</h3>
+                <span className="badge badge-tipo" style={{ alignSelf: "flex-start" }}>
+                  <IconeTipo icone={TIPOS_CONHECIDOS[s.tipo]?.icone ?? "layers"} size={13} /> {nomeDoTipo(s.tipo)}
+                </span>
+                <p className="muted small" style={{ minHeight: 40 }}>
+                  {s.description || `Squad agêntica de ${nomeDoTipo(s.tipo)}`}
+                </p>
+              </Link>
               <div className="spread">
-                <span className="badge badge-blue">{s.owner}</span>
-                <span className="badge">{s.private ? "Privado" : "Público"}</span>
+                <span className="xs muted">Atualizado {ago(s.updatedAt)}</span>
+                {user.isAdmin && !templates.has(`${s.owner}/${s.repo}`.toLowerCase()) && (
+                  <Link href={`/s/${s.owner}/${s.repo}/config#excluir`} className="xs link-perigo">
+                    Excluir
+                  </Link>
+                )}
               </div>
-              <h3>{s.repo}</h3>
-              <span className="badge badge-tipo" style={{ alignSelf: "flex-start" }}>
-                <IconeTipo icone={TIPOS_CONHECIDOS[s.tipo]?.icone ?? "layers"} size={13} /> {nomeDoTipo(s.tipo)}
-              </span>
-              <p className="muted small" style={{ minHeight: 40 }}>
-                {s.description || `Squad agêntica de ${nomeDoTipo(s.tipo)}`}
-              </p>
-              <p className="xs muted">Atualizado {ago(s.updatedAt)}</p>
-            </Link>
+            </div>
           ))}
         </div>
       </div>

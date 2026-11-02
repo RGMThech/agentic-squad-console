@@ -531,3 +531,7 @@ code, pre, kbd { font-family: var(--mono); font-size: 0.9em; }
 .zona-perigo { margin-top: 20px; border-color: var(--red); }
 .zona-perigo h2 { color: var(--red); }
 .btn-danger[disabled] { opacity: 0.5; cursor: not-allowed; }
+.squad-card-link { display: flex; flex-direction: column; gap: 12px; color: inherit; }
+.squad-card-link:hover { text-decoration: none; }
+.link-perigo { color: var(--red); }
+.link-perigo:hover { color: var(--red); }

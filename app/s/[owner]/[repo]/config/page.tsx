@@ -14,6 +14,8 @@ import { DadosCard } from "@/components/DadosCard";
 import { TODOS_SEGREDOS } from "@/lib/dados-meta";
 import { DOCS_DO_TIPO } from "@/lib/tipo";
 import { ExcluirSquad } from "@/components/ExcluirSquad";
+import { listarConexoes } from "@/lib/github";
+import { env } from "@/lib/env";
 
 export const metadata = { title: "Configuração" };
 
@@ -40,6 +42,10 @@ export default async function ConfigPage({ params, searchParams }: { params: Squ
     readFile(ctx.o, owner, repo, "AGENTS.tipo.md", ctx.defaultBranch).catch(() => null),
   ]);
   const contas = new Map(usuarios.map((u) => [u.email, u]));
+  const ehTemplate = [env.templateRepo, ...(await listarConexoes().catch(() => [])).map((c) => c.template)]
+    .filter(Boolean)
+    .some((t) => t.toLowerCase() === `${owner}/${repo}`.toLowerCase());
+  const podeExcluir = ctx.user.isAdmin && !ehTemplate;
 
   const agentes = await Promise.all(
     agentFiles
@@ -63,6 +69,13 @@ export default async function ConfigPage({ params, searchParams }: { params: Squ
         title="Configuração da squad"
         crumbs={[{ href: b, label: ctx.config.nome || repo }, { label: "Configuração" }]}
         subtitle={operador ? "Alterações de agentes, constituição e skills viram Pull Request no repositório da squad, com as checagens do harness." : "Somente operadores podem alterar a configuração."}
+        actions={
+          podeExcluir && (
+            <a href="#excluir" className="btn btn-danger">
+              Excluir squad
+            </a>
+          )
+        }
       />
       <div className="content stack">
         {nova && (
@@ -335,7 +348,7 @@ export default async function ConfigPage({ params, searchParams }: { params: Squ
           </section>
         </div>
 
-        {ctx.user.isAdmin && (
+        {podeExcluir && (
           <section className="card card-pad stack-sm zona-perigo" id="excluir">
             <h2>Excluir a squad</h2>
             <p className="small muted">
